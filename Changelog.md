@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## 0.0.7 (2026-09-16)
+
+Extends the plugin using previously unused fields identified from a real
+captured agent run (`temp/hlm-agent.txt`).
+
+- **New `HLMM Host Status` check.** Imports each matched HLMON host's own
+  status (e.g. reachability), separate from its services, as a check on the
+  piggybacked target host. Opt-in via the new special agent setting "Import
+  HLMON host status" (default off, so upgrading doesn't silently add a new
+  service to every already-monitored host after the next discovery). HLMON
+  hosts use a different `lastState` vocabulary than services
+  (`UP`/`DOWN`/`UNREACHABLE`/`UNKNOWN` instead of
+  `OK`/`WARNING`/`CRITICAL`/`UNKNOWN`); `UNREACHABLE` maps to `CRIT`.
+- **"Im aktuellen Status seit" (state-duration) notice**, based on HLMON's
+  `lastChangeTimestamp`, shown in addition to the existing "last check ago"
+  age (`lastEventTimestamp`) — for both `HLMM Service Status` and the new
+  `HLMM Host Status`. Never affects the Checkmk state.
+- **Service labels** derived from HLMON's `eventSource`, `eventSourceType1`,
+  and `templateIds` fields (`hlmm/event_source`, `hlmm/event_source_type`,
+  `hlmm/template_ids`), so imported services can be filtered/grouped by
+  their underlying HLMON check template. Only emitted when the source field
+  is actually present.
+- **Additional `HLMM Service Status` notices**: originating `source` and
+  `customerName` (always, when present), and the number of linked tickets
+  and comments in HLMON (`ticketCount`/`commentCount`, only shown when
+  greater than 0). Details-only, never affects the Checkmk state.
+
 ## 0.0.6 (2026-09-16)
 
 - **Fixed: "Service name prefix" glued directly onto the service name with

@@ -201,6 +201,21 @@ def _special_agent_formspec():
                     prefill_fixed_levels=DefaultValue(value=(3600.0, 7200.0)),
                 ),
             ),
+            "include_host_status": DictElement(
+                required=True,
+                parameter_form=BooleanChoice(
+                    title=Title("Import HLMON host status"),
+                    help_text=Help(
+                        "Also import each matched HLMON host's own status (separate "
+                        "from its services, e.g. reachability) as a 'HLMM Host Status' "
+                        "check on the piggybacked target host. Off by default so "
+                        "upgrading doesn't silently add a new service to every host "
+                        "after the next discovery."
+                    ),
+                    prefill=DefaultValue(False),
+                    label=Label("Import host status as its own check"),
+                ),
+            ),
             "debug": DictElement(
                 required=True,
                 parameter_form=BooleanChoice(

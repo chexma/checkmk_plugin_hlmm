@@ -274,6 +274,38 @@ def build_service_payload(svc):
         "lastAttempt": svc.get("lastAttempt"),
         "lastMaxAttempts": svc.get("lastMaxAttempts"),
         "lastEventTimestamp": svc.get("lastEventTimestamp"),
+        "lastChangeTimestamp": svc.get("lastChangeTimestamp"),
+        "eventSource": svc.get("eventSource"),
+        "eventSourceType1": svc.get("eventSourceType1"),
+        "templateIds": svc.get("templateIds") or [],
+        "source": svc.get("source"),
+        "customerName": svc.get("customerName"),
+        "ticketCount": svc.get("ticketCount") or 0,
+        "commentCount": svc.get("commentCount") or 0,
+    }
+
+
+def build_host_status_payload(host):
+    """Reduce a raw HLMON host object to the fields the host-status check needs.
+
+    Mirrors build_service_payload(), but for a /api/hosts entry -- hosts
+    don't have hostId/eventSource*/templateIds or the service-only notice
+    fields (source/customerName/ticketCount/commentCount), so those are
+    intentionally left out here.
+    """
+    return {
+        "id": host["id"],
+        "displayName": host.get("displayName") or host.get("name"),
+        "lastState": host.get("lastState", "UNKNOWN"),
+        "lastStateType": host.get("lastStateType"),
+        "lastOutput": host.get("lastOutput", ""),
+        "lastLongOutput": host.get("lastLongOutput", ""),
+        "inDowntime": bool(host.get("inDowntime")),
+        "lastProblemAcknowledged": bool(host.get("lastProblemAcknowledged")),
+        "lastAttempt": host.get("lastAttempt"),
+        "lastMaxAttempts": host.get("lastMaxAttempts"),
+        "lastEventTimestamp": host.get("lastEventTimestamp"),
+        "lastChangeTimestamp": host.get("lastChangeTimestamp"),
     }
 
 
@@ -294,10 +326,13 @@ def build_check_config(args):
     }
 
 
-def emit_piggyback(host_display_name, config, services):
+def emit_piggyback(host_display_name, config, services, host_status=None):
     print(f"<<<<{host_display_name}>>>>")
     print("<<<hlmm_services:sep(0)>>>")
     print(json.dumps({"config": config, "services": services}, separators=(",", ":")))
+    if host_status is not None:
+        print("<<<hlmm_host_status:sep(0)>>>")
+        print(json.dumps({"config": config, "host": host_status}, separators=(",", ":")))
     print("<<<<>>>>")
 
 
@@ -402,6 +437,12 @@ def _parse_args(argv):
         "item (a separating space is added automatically by the check plugin, do "
         "not include a trailing space here). Pass an empty string for no prefix.",
     )
+    parser.add_argument(
+        "--include-host-status",
+        action="store_true",
+        help="Also emit a hlmm_host_status section per piggybacked host, built "
+        "from the host's own raw HLMON status (not just its services).",
+    )
     parser.add_argument("--downtime-handling", choices=["ok", "original"], default="ok")
     parser.add_argument("--ack-handling", choices=["ok", "original"], default="ok")
     parser.add_argument("--staleness-warn", type=int, default=None, help="Seconds")
@@ -464,10 +505,33 @@ def main(argv=None):
     if args.dump_dir:
         _dump_raw(args.dump_dir, raw_hosts, raw_services)
 
-    grouped = _group_services_by_host(matched_services, hosts_by_id)
+    grouped_services = _group_services_by_host(matched_services, hosts_by_id)
+    raw_hosts_by_id = {h["id"]: h for h in raw_hosts}
     config = build_check_config(args)
-    for display_name, payloads in grouped.items():
-        emit_piggyback(display_name, config, payloads)
+
+    # Iterate matched_hosts (not e.g. a set union) so emission order is
+    # deterministic. Without --include-host-status a host is only emitted
+    # if it has matched services -- same behavior as before this feature
+    # existed. With it, a host with zero matched services still gets a
+    # block (empty "services", populated "host"), so its own status isn't
+    # silently lost just because none of its services matched the patterns.
+    emitted = 0
+    seen_names = set()
+    for host in matched_hosts:
+        display_name = host["display_name"]
+        if display_name in seen_names:
+            continue
+        services = grouped_services.get(display_name)
+        host_status = None
+        if args.include_host_status:
+            raw_host = raw_hosts_by_id.get(host["id"])
+            if raw_host is not None:
+                host_status = build_host_status_payload(raw_host)
+        if services is None and host_status is None:
+            continue
+        emit_piggyback(display_name, config, services or [], host_status=host_status)
+        seen_names.add(display_name)
+        emitted += 1
 
     status = {
         "queried_at": datetime.now(timezone.utc).astimezone().isoformat(),
@@ -476,7 +540,7 @@ def main(argv=None):
         "hosts_matched": len(matched_hosts),
         "services_fetched": len(raw_services),
         "services_matched": len(matched_services),
-        "targets_emitted": len(grouped),
+        "targets_emitted": emitted,
         "errors": errors,
     }
     emit_status(status)

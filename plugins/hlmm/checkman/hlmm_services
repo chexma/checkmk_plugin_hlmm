@@ -25,6 +25,21 @@ description:
  avoid cluttering the main status line with information that isn't a
  problem.
 
+ A third line, "Im aktuellen Status seit", shows how long the service has
+ been in its current state (HLMON's {lastChangeTimestamp}, distinct from
+ the check-age line above). This never affects the Checkmk state, and is
+ only shown in the details unless the service is not in state {OK}.
+
+ If available from HLMON, further details-only notices are shown: the
+ originating source system, the customer name, and -- only when non-zero
+ -- the number of tickets and comments linked to the service in HLMON.
+
+ Each discovered service also carries Checkmk service labels derived
+ from HLMON's event source metadata, where present: {hlmm/event_source},
+ {hlmm/event_source_type}, and {hlmm/template_ids} (comma-separated if a
+ service has more than one template). These can be used to filter or
+ group imported services by the underlying HLMON check template.
+
  If a service that was previously discovered is no longer reported by
  HLMON (e.g. it was deleted there, or no longer matches the configured
  service name patterns), the check goes {UNKNOWN}.

@@ -1,0 +1,43 @@
+title: HLMM Host Status
+agents: hlmm
+catalog: os/services
+license: GPLv2
+distribution: check_mk
+description:
+ This check imports a HLMON host's own status (e.g. reachability), as
+ opposed to the status of its individual services, and shows it as a
+ Checkmk service on the piggybacked target host.
+
+ HLMON hosts use a different state vocabulary than HLMON services. The
+ check maps HLMON's {lastState} to Checkmk states:
+ UP → {OK}, DOWN → {CRIT}, UNREACHABLE → {CRIT}, UNKNOWN → {UNKNOWN}.
+ Any other value also results in {UNKNOWN}.
+
+ If HLMON reports the host as being in downtime or as acknowledged, that
+ is always shown in the check output. Whether it also forces the Checkmk
+ state to {OK} is controlled by the same "Effect of HLMON downtime /
+ acknowledgement on the Checkmk service state" options of the special
+ agent rule that apply to {HLMM Service Status} (default: forced to
+ {OK} for both).
+
+ A second line reports how long ago HLMON last checked the host, and a
+ third line, "Im aktuellen Status seit", how long the host has been in
+ its current state (HLMON's {lastChangeTimestamp}). Neither affects the
+ Checkmk state. The check-age line escalates to {WARN}/{CRIT} only if the
+ special agent rule configures age thresholds ("Age of last HLMON
+ check") and they are exceeded.
+
+ This check is only created if the special agent rule's "Import HLMON
+ host status" option is enabled; it is off by default so that upgrading
+ the plugin does not silently add a new service to every already
+ monitored host after the next service discovery.
+
+ Requires the HLMON special agent to be configured on a "collector"
+ host; the check is attached via piggyback to the Checkmk host that
+ shares its name with the HLMON host's displayName.
+
+discovery:
+ One service, without an item, is created per piggybacked host for
+ which the special agent produced host status data (i.e. the host
+ matched the configured host name patterns / "All hosts", and "Import
+ HLMON host status" was enabled at the time of discovery).

@@ -42,6 +42,9 @@ def _agent_arguments(params, host_config):
         warn, crit = staleness_levels[1]
         args.extend(["--staleness-warn", str(int(warn)), "--staleness-crit", str(int(crit))])
 
+    if params.get("include_host_status"):
+        args.append("--include-host-status")
+
     if params.get("debug"):
         args.append("--debug")
 

@@ -26,6 +26,11 @@ description:
  If the special agent produced no status data at all (e.g. it crashed
  before completing), the check goes {UNKNOWN}.
 
+ A piggybacked target host does not necessarily get a {HLMM Service
+ Status} check: if "Import HLMON host status" is enabled but none of the
+ host's services matched the configured service name patterns, only the
+ {HLMM Host Status} check is created for that host.
+
  Performance data ({hlmm_status_hosts_matched}, {hlmm_status_services_matched},
  {hlmm_status_duration}) is attached whenever the special agent produced
  any status data, even in the {CRIT}/{WARN} cases -- so a graph of hosts

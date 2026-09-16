@@ -17,6 +17,7 @@ from cmk.agent_based.v2 import (
     Metric,
     Result,
     Service,
+    ServiceLabel,
     State,
     check_levels,
     render,
@@ -26,6 +27,17 @@ _STATE_MAP = {
     "OK": State.OK,
     "WARNING": State.WARN,
     "CRITICAL": State.CRIT,
+    "UNKNOWN": State.UNKNOWN,
+}
+
+# HLMON hosts use a *different* lastState vocabulary than services
+# (up/down/unreachable/unknown, per the API reference's /hosts filter docs
+# and the "UP" value in the real example host payload) -- do not reuse
+# _STATE_MAP for hlmm_host_status, "UP" would map to UNKNOWN.
+_HOST_STATE_MAP = {
+    "UP": State.OK,
+    "DOWN": State.CRIT,
+    "UNREACHABLE": State.CRIT,
     "UNKNOWN": State.UNKNOWN,
 }
 
@@ -96,11 +108,25 @@ def parse_hlmm_services(string_table):
     return {"config": config, "services": services}
 
 
+def _build_service_labels(svc):
+    """Service labels identifying the HLMON check template, for filtering/
+    grouping imported services in Checkmk. Empty/missing values are skipped
+    rather than emitted as an empty-value label."""
+    if event_source := svc.get("eventSource"):
+        yield ServiceLabel("hlmm/event_source", str(event_source))
+    if event_source_type := svc.get("eventSourceType1"):
+        yield ServiceLabel("hlmm/event_source_type", str(event_source_type))
+    if template_ids := svc.get("templateIds"):
+        # A Service can't carry several same-named labels, so a multi-value
+        # field is joined into one label rather than repeated per ID.
+        yield ServiceLabel("hlmm/template_ids", ",".join(str(t) for t in template_ids))
+
+
 def discover_hlmm_services(section):
     if not section:
         return
     for svc in section["services"]:
-        yield Service(item=svc["_item"])
+        yield Service(item=svc["_item"], labels=list(_build_service_labels(svc)))
 
 
 def _find_service(section, item):
@@ -144,18 +170,39 @@ def _check_staleness(timestamp, config):
     )
 
 
-def check_hlmm_services(item, section):
-    if not section:
-        yield Result(state=State.UNKNOWN, summary="Keine Daten vom Special Agent erhalten")
+def _check_state_since(timestamp):
+    """Report how long the entry has been in its current state.
+
+    Distinct from _check_staleness(): `timestamp` here is lastChangeTimestamp
+    (when the state last changed), not lastEventTimestamp (when it was last
+    checked). Purely informational -- always `notice=` (details-only unless
+    combined with a non-OK Result from elsewhere in the same check), never
+    escalates the state itself; there's no threshold concept for this.
+    """
+    if not timestamp:
+        yield Result(state=State.OK, notice="Im aktuellen Status seit: unbekannt")
         return
 
-    entry = _find_service(section, item)
-    if entry is None:
-        yield Result(state=State.UNKNOWN, summary="Von HLMON nicht mehr gemeldet")
+    try:
+        changed_at = datetime.fromisoformat(timestamp)
+    except ValueError:
+        yield Result(
+            state=State.OK, notice=f"Im aktuellen Status seit: {timestamp} (Format unbekannt)"
+        )
         return
 
-    config = section["config"]
-    state = _STATE_MAP.get(entry.get("lastState"), State.UNKNOWN)
+    now = datetime.now(changed_at.tzinfo) if changed_at.tzinfo else datetime.now()
+    delta = max((now - changed_at).total_seconds(), 0.0)
+    yield Result(state=State.OK, notice=f"Im aktuellen Status seit {render.timespan(delta)}")
+
+
+def _check_status_entry(entry, config, state_map=_STATE_MAP):
+    """Shared by check_hlmm_services and check_hlmm_host_status: state
+    mapping, downtime/ack override + notes, staleness, and "in current
+    state since". `state_map` differs because HLMON hosts and services use
+    different lastState vocabularies -- see _HOST_STATE_MAP.
+    """
+    state = state_map.get(entry.get("lastState"), State.UNKNOWN)
     notes = []
 
     if entry.get("inDowntime"):
@@ -173,6 +220,37 @@ def check_hlmm_services(item, section):
 
     yield Result(state=state, summary=summary, details=entry.get("lastLongOutput") or None)
     yield from _check_staleness(entry.get("lastEventTimestamp"), config)
+    yield from _check_state_since(entry.get("lastChangeTimestamp"))
+
+
+def _service_extra_notices(entry):
+    """Extra, service-only informational notices (not applicable to the
+    host-status check, which has no source/customer/ticket/comment fields).
+    Always notice= (details-only unless something else in the same check
+    already made the service non-OK) -- these never affect the state.
+    """
+    if source := entry.get("source"):
+        yield Result(state=State.OK, notice=f"Quelle: {source}")
+    if customer_name := entry.get("customerName"):
+        yield Result(state=State.OK, notice=f"Kunde: {customer_name}")
+    if (ticket_count := entry.get("ticketCount") or 0) > 0:
+        yield Result(state=State.OK, notice=f"{ticket_count} verknüpfte(s) Ticket(s) in HLMON")
+    if (comment_count := entry.get("commentCount") or 0) > 0:
+        yield Result(state=State.OK, notice=f"{comment_count} Kommentar(e) in HLMON")
+
+
+def check_hlmm_services(item, section):
+    if not section:
+        yield Result(state=State.UNKNOWN, summary="Keine Daten vom Special Agent erhalten")
+        return
+
+    entry = _find_service(section, item)
+    if entry is None:
+        yield Result(state=State.UNKNOWN, summary="Von HLMON nicht mehr gemeldet")
+        return
+
+    yield from _check_status_entry(entry, section["config"])
+    yield from _service_extra_notices(entry)
 
 
 agent_section_hlmm_services = AgentSection(
@@ -188,6 +266,49 @@ check_plugin_hlmm_services = CheckPlugin(
     service_name="%s",
     discovery_function=discover_hlmm_services,
     check_function=check_hlmm_services,
+)
+
+
+def parse_hlmm_host_status(string_table):
+    """Parse the {"config": {...}, "host": {...}} payload from agent_hlmm.
+
+    Only emitted (and only ever piggybacked, like hlmm_services -- never on
+    the collector host) when the special agent's "Import HLMON host status"
+    setting is enabled; absent otherwise, so this check simply won't be
+    discovered until that's turned on and rediscovered.
+    """
+    raw = _parse_json_section(string_table)
+    if raw is None:
+        return None
+    config = {**_DEFAULT_CONFIG, **(raw.get("config") or {})}
+    host = raw.get("host")
+    if host is None:
+        return None
+    return {"config": config, "host": host}
+
+
+def discover_hlmm_host_status(section):
+    if section:
+        yield Service()
+
+
+def check_hlmm_host_status(section):
+    if not section:
+        yield Result(state=State.UNKNOWN, summary="Keine Daten vom Special Agent erhalten")
+        return
+    yield from _check_status_entry(section["host"], section["config"], state_map=_HOST_STATE_MAP)
+
+
+agent_section_hlmm_host_status = AgentSection(
+    name="hlmm_host_status",
+    parse_function=parse_hlmm_host_status,
+)
+
+check_plugin_hlmm_host_status = CheckPlugin(
+    name="hlmm_host_status",
+    service_name="HLMM Host Status",
+    discovery_function=discover_hlmm_host_status,
+    check_function=check_hlmm_host_status,
 )
 
 
