@@ -61,7 +61,7 @@ def _special_agent_formspec():
                 ),
             ),
             "verify_ssl": DictElement(
-                required=False,
+                required=True,
                 parameter_form=BooleanChoice(
                     title=Title("Verify SSL certificate"),
                     help_text=Help(
@@ -103,7 +103,7 @@ def _special_agent_formspec():
                 ),
             ),
             "downtime_handling": DictElement(
-                required=False,
+                required=True,
                 parameter_form=SingleChoice(
                     title=Title("Effect of HLMON downtime on the Checkmk service state"),
                     help_text=Help(
@@ -121,7 +121,7 @@ def _special_agent_formspec():
                 ),
             ),
             "ack_handling": DictElement(
-                required=False,
+                required=True,
                 parameter_form=SingleChoice(
                     title=Title("Effect of HLMON acknowledgement on the Checkmk service state"),
                     help_text=Help(
@@ -139,7 +139,7 @@ def _special_agent_formspec():
                 ),
             ),
             "staleness_levels": DictElement(
-                required=False,
+                required=True,
                 parameter_form=SimpleLevels(
                     title=Title("Age of last HLMON check"),
                     help_text=Help(
@@ -153,7 +153,7 @@ def _special_agent_formspec():
                 ),
             ),
             "debug": DictElement(
-                required=False,
+                required=True,
                 parameter_form=BooleanChoice(
                     title=Title("Debug mode"),
                     help_text=Help(
