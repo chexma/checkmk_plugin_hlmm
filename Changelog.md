@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 0.0.6 (2026-09-16)
+
+- **Fixed: "Service name prefix" glued directly onto the service name with
+  no space** (e.g. "HLMM" + "myservice" -> "HLMMmyservice" instead of
+  "HLMM myservice"). The separating space used to have to be typed into the
+  prefix field itself (default `"HLMM "` with a trailing space) — easy to
+  lose, since trailing whitespace in a text field is invisible and can be
+  silently stripped on save. `_assign_items()` in `agent_based/hlmm.py` now
+  always inserts exactly one space itself between a non-empty prefix and
+  the service name (after `.strip()`-ping the prefix, so a trailing space
+  the user *did* type doesn't produce a double space); the ruleset/agent
+  default changed from `"HLMM "` to `"HLMM"` accordingly. Existing rules
+  using the old `"HLMM "` default keep working unchanged (the trailing
+  space is just stripped and re-added); rules that were saved with a bare
+  `"HLMM"` (no trailing space) now get the space they were always meant to.
+
 ## 0.0.5 (2026-09-16)
 
 - **"All hosts" option for host selection.** "Hosts to import" in the

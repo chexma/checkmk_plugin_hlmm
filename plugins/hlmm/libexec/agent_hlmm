@@ -397,9 +397,10 @@ def _parse_args(argv):
     )
     parser.add_argument(
         "--service-prefix",
-        default="HLMM ",
+        default="HLMM",
         help="Prepended to each imported service's displayName to form the Checkmk "
-        "item. Pass an empty string for no prefix.",
+        "item (a separating space is added automatically by the check plugin, do "
+        "not include a trailing space here). Pass an empty string for no prefix.",
     )
     parser.add_argument("--downtime-handling", choices=["ok", "original"], default="ok")
     parser.add_argument("--ack-handling", choices=["ok", "original"], default="ok")

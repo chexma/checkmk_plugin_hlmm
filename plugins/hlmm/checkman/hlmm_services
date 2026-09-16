@@ -39,9 +39,10 @@ description:
 
 item:
  The special agent rule's configured "Service name prefix" (default
- "HLMM ", can be set to empty for no prefix -- useful to tell services
- imported by different special agent rules apart) followed by the HLMON
- service's displayName. If two services on the same host share the same
+ "HLMM", can be set to empty for no prefix -- useful to tell services
+ imported by different special agent rules apart), a single automatically
+ added space, and the HLMON service's displayName. If two services on the
+ same host share the same
  resulting name, the second and further occurrences get the HLMON
  service id appended in parentheses, e.g. "HLMM myservice (1002)", so
  they are not merged into a single item.

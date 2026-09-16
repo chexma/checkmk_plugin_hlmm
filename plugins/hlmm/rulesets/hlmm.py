@@ -141,12 +141,14 @@ def _special_agent_formspec():
                     title=Title("Service name prefix"),
                     help_text=Help(
                         "Prepended to each imported service's displayName to form the "
-                        "Checkmk service name, e.g. 'HLMM ' -> 'HLMM myservice'. Leave "
-                        "empty for no prefix at all. Useful to tell services imported by "
-                        "different special agent rules (e.g. different host/service "
-                        "pattern combinations) apart."
+                        "Checkmk service name, e.g. 'HLMM' -> 'HLMM myservice'. A single "
+                        "space is added automatically between the prefix and the service "
+                        "name -- do not type a trailing space yourself, it's stripped. "
+                        "Leave empty for no prefix at all. Useful to tell services "
+                        "imported by different special agent rules (e.g. different "
+                        "host/service pattern combinations) apart."
                     ),
-                    prefill=DefaultValue("HLMM "),
+                    prefill=DefaultValue("HLMM"),
                 ),
             ),
             "downtime_handling": DictElement(

@@ -51,19 +51,30 @@ def _assign_items(services, prefix):
     """Assign a unique CheckMK item name to every service.
 
     `prefix` (the special agent's "Service name prefix" setting, possibly
-    empty) is prepended to every item -- the service_name template itself is
-    just "%s" (see check_plugin_hlmm_services) since a CheckPlugin's
-    service_name is a fixed string and can't read per-rule configuration.
+    empty) is prepended to every item, separated by exactly one space that
+    this function adds itself -- the separator is never taken from `prefix`
+    verbatim. That's deliberate: a user-typed or GUI-saved trailing space is
+    easy to lose (invisible in a text field, and some form handling strips
+    trailing whitespace on save), which previously caused prefixes like
+    "HLMM" to glue directly onto the service name ("HLMMmyservice") instead
+    of "HLMM myservice". `prefix` is `.strip()`-ped first so a trailing (or
+    leading) space the user *did* type doesn't produce a double space.
+    service_name itself is just "%s" (see check_plugin_hlmm_services) since
+    a CheckPlugin's service_name is a fixed string and can't read per-rule
+    configuration.
 
     Two services on the same host can share a displayName; the second (and
     further) occurrence gets its HLMON service id appended so discovery
     doesn't silently drop or merge them (see the concept doc's "open
     questions" section).
     """
+    prefix = prefix.strip()
+    item_prefix = f"{prefix} " if prefix else ""
+
     seen = {}
     for svc in services:
         name = svc.get("displayName") or f"service-{svc.get('id')}"
-        base = f"{prefix}{name}"
+        base = f"{item_prefix}{name}"
         seen[base] = seen.get(base, 0) + 1
         svc["_item"] = base if seen[base] == 1 else f"{base} ({svc['id']})"
     return services
