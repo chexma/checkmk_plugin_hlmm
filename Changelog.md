@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## 0.0.3 (2026-09-16)
+
+- Fixed: `verify_ssl=False` was silently ignored on real Checkmk sites even
+  with a correct ruleset (0.0.2's fix), because `HlmmClient` set
+  `session.verify = False` but never passed `verify=` on the actual request
+  call. `requests` only falls back to `session.verify` when the per-call
+  value is `None`; since it wasn't set, `requests` substituted
+  `REQUESTS_CA_BUNDLE`/`CURL_CA_BUNDLE` from the environment (every OMD site
+  sets `REQUESTS_CA_BUNDLE`), and that non-`None` value then won over
+  `session.verify=False` in `requests`' own merge logic — re-enabling
+  certificate verification against a CA bundle that doesn't know the HLMON
+  server's certificate. `verify=` is now passed explicitly on every request.
+  Confirmed via a regression test that exercises real `requests` merge logic
+  (not a mocked session) with `REQUESTS_CA_BUNDLE` set.
+
 ## 0.0.2 (2026-09-16)
 
 - Fixed: unchecking "Verify SSL certificate" in the special agent rule

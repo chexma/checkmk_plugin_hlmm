@@ -45,7 +45,11 @@ class HlmmClient:
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
         self.session.auth = (username, password)
+        # Also set on the session for anything that inspects it, but the
+        # actual enforcement is the explicit verify=self.verify_ssl on every
+        # request in get_all() below -- see the comment there for why.
         self.session.verify = verify_ssl
+        self.verify_ssl = verify_ssl
         self.timeout = timeout
         self.page_size = page_size
 
@@ -69,7 +73,18 @@ class HlmmClient:
             url = f"{self.base_url}{path}"
             start = time.monotonic()
             try:
-                resp = self.session.get(url, params=params, timeout=self.timeout)
+                # verify is passed explicitly (not just via self.session.verify)
+                # because requests only consults the session-level setting when
+                # the per-call value is still None; if it's None, requests first
+                # substitutes REQUESTS_CA_BUNDLE/CURL_CA_BUNDLE from the
+                # environment (set by every OMD site) when that value isn't
+                # None either, and that substituted value then wins over
+                # session.verify=False in urllib3's merge logic -- silently
+                # re-enabling verification. Passing verify= here keeps it a
+                # concrete True/False the whole way through.
+                resp = self.session.get(
+                    url, params=params, timeout=self.timeout, verify=self.verify_ssl
+                )
             except requests.RequestException as exc:
                 log_debug(f"GET {path} page={page} -> request failed: {exc}")
                 return items, f"Request failed on {path} (page {page}): {exc}"
