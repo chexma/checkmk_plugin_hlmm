@@ -1,0 +1,31 @@
+title: HLMM Query Status
+agents: hlmm
+catalog: os/services
+license: GPLv2
+distribution: check_mk
+description:
+ This check reports whether the HLMON special agent's own query against
+ the HLMON REST API succeeded, on the "collector" host the special
+ agent rule is assigned to (not on the piggybacked target hosts).
+
+ It exists because a broken or partial HLMON query would otherwise only
+ be visible indirectly -- e.g. as stale {HLMM Service Status} checks on
+ various hosts -- which is easy to miss. This check makes it visible in
+ one place.
+
+ The check goes {CRIT} if the agent could not resolve any hosts or
+ services at all (e.g. the HLMON server was unreachable, or
+ authentication failed). It goes {WARN} if some, but not all, requests
+ failed (e.g. one batch of a paginated /services query returned an
+ error while others succeeded) -- the summary shows how many errors
+ occurred, and the details list each one with the stage it occurred in
+ (hosts, services, or pattern) and the underlying error. Otherwise it is
+ {OK} and shows how many hosts and services were matched, and how long
+ the query took.
+
+ If the special agent produced no status data at all (e.g. it crashed
+ before completing), the check goes {UNKNOWN}.
+
+discovery:
+ One service is created once the special agent has produced any status
+ data.

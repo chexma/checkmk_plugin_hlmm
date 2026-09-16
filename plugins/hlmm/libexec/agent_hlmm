@@ -1,0 +1,442 @@
+#!/usr/bin/env python3
+"""Special agent that imports HLMON service status into CheckMK.
+
+See plans/2026-09-16-hlmm-plugin-konzept.md for the overall design
+(piggyback per resolved host, displayName-based matching, HLMON API shape)
+and plans/2026-09-16-hlmm-plugin-plan.md for the implementation tasks this
+file is built up in.
+"""
+
+import argparse
+import json
+import re
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+import requests
+
+DEBUG = False
+
+
+def log_debug(msg):
+    """Write a debug line to stderr, but only when --debug is active."""
+    if DEBUG:
+        sys.stderr.write(f"[debug] {msg}\n")
+
+
+class HlmmClient:
+    """Thin client for the HLMON "Monitoring Module" REST API.
+
+    Handles HTTP Basic Auth and the pagination envelope used by /api/hosts
+    and /api/services (content[] / last, see the API reference doc).
+    """
+
+    def __init__(
+        self,
+        base_url,
+        username,
+        password,
+        verify_ssl=True,
+        timeout=(10, 30),
+        page_size=100,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.session = requests.Session()
+        self.session.auth = (username, password)
+        self.session.verify = verify_ssl
+        self.timeout = timeout
+        self.page_size = page_size
+
+    def get_all(self, path, filters=None, extra_params=None):
+        """Fetch every page of a paginated /api/... endpoint.
+
+        Returns (items, error). `error` is a string describing the first
+        HTTP/network/decoding failure encountered; items already collected
+        from earlier pages are still returned, so a late failure doesn't
+        discard prior progress.
+        """
+        items = []
+        page = 0
+        while True:
+            params = {"page": page, "pageSize": self.page_size}
+            if extra_params:
+                params.update(extra_params)
+            if filters is not None:
+                params["filters"] = json.dumps(filters, separators=(",", ":"))
+
+            url = f"{self.base_url}{path}"
+            start = time.monotonic()
+            try:
+                resp = self.session.get(url, params=params, timeout=self.timeout)
+            except requests.RequestException as exc:
+                log_debug(f"GET {path} page={page} -> request failed: {exc}")
+                return items, f"Request failed on {path} (page {page}): {exc}"
+            elapsed = time.monotonic() - start
+
+            if resp.status_code != 200:
+                log_debug(f"GET {path} page={page} -> HTTP {resp.status_code} in {elapsed:.2f}s")
+                return items, f"HTTP {resp.status_code} on {path} (page {page})"
+
+            try:
+                data = resp.json()
+            except ValueError as exc:
+                log_debug(f"GET {path} page={page} -> invalid JSON: {exc}")
+                return items, f"Invalid JSON on {path} (page {page}): {exc}"
+
+            content = data.get("content", [])
+            log_debug(f"GET {path} page={page} -> {len(content)} items in {elapsed:.2f}s")
+            items.extend(content)
+
+            if data.get("last", True) or not content:
+                break
+            page += 1
+
+        return items, None
+
+
+def field_in_filter(field, values):
+    """Build the flat HLMON filter structure for "field in values"."""
+    return [{"field": field, "comparison": "in", "value": list(values)}]
+
+
+def _extract_in_filter_values(filters, field):
+    """Pull the value list back out of a field_in_filter()-shaped filter.
+
+    Only needed by ReplayClient, which has no real API to evaluate the
+    filters query parameter against.
+    """
+    if not filters:
+        return []
+    for f in filters:
+        if f.get("field") == field and f.get("comparison") == "in":
+            return f.get("value", [])
+    return []
+
+
+class ReplayClient:
+    """Stand-in for HlmmClient that serves local fixture files.
+
+    Activated via --replay-dir so the agent can be developed and tested
+    without access to a real HLMON server (see idea.md). The fixture
+    directory holds two flat JSON arrays, `hosts.json` and `services.json`,
+    each without the pagination envelope.
+    """
+
+    def __init__(self, replay_dir):
+        replay_dir = Path(replay_dir)
+        self._hosts = json.loads((replay_dir / "hosts.json").read_text())
+        self._services = json.loads((replay_dir / "services.json").read_text())
+
+    def get_all(self, path, filters=None, extra_params=None):
+        if path == "/hosts":
+            log_debug(f"replay: /hosts -> {len(self._hosts)} items")
+            return self._hosts, None
+        if path == "/services":
+            host_ids = set(_extract_in_filter_values(filters, "hostId"))
+            matched = [s for s in self._services if s.get("hostId") in host_ids]
+            log_debug(f"replay: /services (hostId in {sorted(host_ids)}) -> {len(matched)} items")
+            return matched, None
+        return [], f"ReplayClient: unknown path {path}"
+
+
+def _compile_patterns(patterns, errors):
+    """Compile each pattern individually; a broken one is reported, not fatal."""
+    compiled = []
+    for pattern in patterns:
+        try:
+            compiled.append(re.compile(pattern))
+        except re.error as exc:
+            errors.append({"stage": "pattern", "detail": f"Invalid pattern {pattern!r}: {exc}"})
+    return compiled
+
+
+def _chunk(items, size):
+    """Split `items` into consecutive lists of at most `size` elements."""
+    items = list(items)
+    for i in range(0, len(items), size):
+        end = i + size
+        yield items[i:end]
+
+
+def _matches_any(name, compiled_patterns):
+    return any(p.search(name) for p in compiled_patterns)
+
+
+def resolve_hosts(client, patterns, errors):
+    """Resolve HLMON hosts whose displayName matches any of `patterns`.
+
+    Matching always happens against `displayName` (falling back to `name`
+    only when displayName is missing/empty) — see the concept doc, section 4,
+    for why: `name` is HLMON's opaque internal identifier, `displayName` is
+    the human-readable name that matches CheckMK hostnames.
+
+    Returns (raw_hosts, matched): `raw_hosts` is the unfiltered response from
+    /hosts (used by --dump-dir so captured fixtures can later be replayed
+    against different --host-pattern values), `matched` is a list of
+    {"id": ..., "display_name": ...} for hosts that matched a pattern. Never
+    raises; HTTP and pattern errors are appended to `errors` and the
+    function degrades to an empty/partial result instead.
+    """
+    hosts, error = client.get_all("/hosts")
+    if error:
+        errors.append({"stage": "hosts", "detail": error})
+
+    compiled = _compile_patterns(patterns, errors)
+    if not compiled:
+        return hosts, []
+
+    matched = [
+        {"id": host["id"], "display_name": host.get("displayName") or host.get("name") or ""}
+        for host in hosts
+        if _matches_any(host.get("displayName") or host.get("name") or "", compiled)
+    ]
+    log_debug(
+        f"resolve_hosts: {len(hosts)} hosts fetched, {len(matched)} matched "
+        f"patterns={patterns!r}"
+    )
+    return hosts, matched
+
+
+def fetch_services_for_hosts(client, host_ids, errors, batch_size=50):
+    """Fetch all services for the given host IDs, batched via hostId "in" filters.
+
+    A failure on one batch is recorded in `errors` (with the affected
+    host_ids) but does not prevent other batches from being fetched.
+    """
+    services = []
+    for batch in _chunk(host_ids, batch_size):
+        items, error = client.get_all("/services", filters=field_in_filter("hostId", batch))
+        if error:
+            errors.append({"stage": "services", "detail": error, "host_ids": batch})
+        services.extend(items)
+    log_debug(f"fetch_services_for_hosts: {len(host_ids)} host_ids -> {len(services)} services")
+    return services
+
+
+def filter_services(services, patterns, errors):
+    """Keep only services whose displayName (fallback: name) matches any pattern."""
+    compiled = _compile_patterns(patterns, errors)
+    if not compiled:
+        return []
+
+    matched = [
+        s for s in services if _matches_any(s.get("displayName") or s.get("name") or "", compiled)
+    ]
+    log_debug(
+        f"filter_services: {len(services)} fetched, {len(matched)} matched "
+        f"patterns={patterns!r}"
+    )
+    return matched
+
+
+def build_service_payload(svc):
+    """Reduce a raw HLMON service object to the fields the check plugin needs."""
+    return {
+        "id": svc["id"],
+        "hostId": svc.get("hostId"),
+        "displayName": svc.get("displayName") or svc.get("name"),
+        "lastState": svc.get("lastState", "UNKNOWN"),
+        "lastStateType": svc.get("lastStateType"),
+        "lastOutput": svc.get("lastOutput", ""),
+        "lastLongOutput": svc.get("lastLongOutput", ""),
+        "inDowntime": bool(svc.get("inDowntime")),
+        "lastProblemAcknowledged": bool(svc.get("lastProblemAcknowledged")),
+        "lastAttempt": svc.get("lastAttempt"),
+        "lastMaxAttempts": svc.get("lastMaxAttempts"),
+        "lastEventTimestamp": svc.get("lastEventTimestamp"),
+    }
+
+
+def build_check_config(args):
+    """Settings the special-agent ruleset controls but the check function needs.
+
+    There is deliberately no separate CheckMK check-parameter ruleset for
+    hlmm_services (see the concept doc) — downtime/ack handling and
+    staleness thresholds are special-agent settings, so they travel inside
+    the section payload itself instead.
+    """
+    return {
+        "downtime_handling": args.downtime_handling,
+        "ack_handling": args.ack_handling,
+        "staleness_warn": args.staleness_warn,
+        "staleness_crit": args.staleness_crit,
+    }
+
+
+def emit_piggyback(host_display_name, config, services):
+    print(f"<<<<{host_display_name}>>>>")
+    print("<<<hlmm_services:sep(0)>>>")
+    print(json.dumps({"config": config, "services": services}, separators=(",", ":")))
+    print("<<<<>>>>")
+
+
+def emit_status(status):
+    print("<<<hlmm_status:sep(0)>>>")
+    print(json.dumps(status, separators=(",", ":")))
+
+
+def _dump_raw(dump_dir, hosts, services):
+    """Save fetched-but-unfiltered API responses for later --replay-dir use.
+
+    `hosts` covers every host from /hosts (so a later run can experiment
+    with different --host-pattern values); `services` covers every service
+    fetched for the currently matched hosts (before --service-pattern
+    filtering), matching what ReplayClient expects to find.
+    """
+    dump_dir = Path(dump_dir)
+    dump_dir.mkdir(parents=True, exist_ok=True)
+    (dump_dir / "hosts.json").write_text(json.dumps(hosts, indent=2))
+    (dump_dir / "services.json").write_text(json.dumps(services, indent=2))
+
+
+def _group_services_by_host(services, hosts_by_id):
+    """Group service payloads by their host's displayName, dropping orphans.
+
+    A service can't be grouped if its hostId isn't among the resolved hosts
+    (shouldn't normally happen since services were fetched by those exact
+    IDs, but a defensive check here avoids emitting piggyback data for an
+    unresolved host).
+    """
+    grouped = {}
+    for svc in services:
+        host = hosts_by_id.get(svc.get("hostId"))
+        if host is None:
+            continue
+        grouped.setdefault(host["display_name"], []).append(build_service_payload(svc))
+    return grouped
+
+
+def _resolve_password(args):
+    """Resolve the HLMON API password: --password-ref, then --password, then stdin.
+
+    Mirrors the proven agent_sep_sesam convention exactly (see CLAUDE.md).
+    """
+    if args.password_ref:
+        try:
+            from cmk.utils import password_store
+
+            pw_id, pw_file = args.password_ref.split(":", maxsplit=1)
+            return password_store.lookup(Path(pw_file), pw_id)
+        except Exception as exc:  # noqa: BLE001 - surfaced to the user, not swallowed
+            sys.exit(f"agent_hlmm: failed to resolve --password-ref: {exc}")
+    if args.password:
+        return args.password
+    return sys.stdin.read().strip()
+
+
+def _parse_args(argv):
+    parser = argparse.ArgumentParser(description="HLMON special agent for CheckMK")
+    parser.add_argument("--url", help="HLMON server URL, e.g. https://hlmon.example.local")
+    parser.add_argument("--username", help="HLMON API username")
+
+    pw_group = parser.add_mutually_exclusive_group()
+    pw_group.add_argument(
+        "--password-ref",
+        help="Password store reference in the form <pw_id>:<password_store_file>. "
+        "Resolved via cmk.utils.password_store.lookup at runtime so the "
+        "plaintext password never appears on the command line.",
+    )
+    pw_group.add_argument(
+        "--password",
+        help="HLMON API password in plain text (not recommended -- visible in ps).",
+    )
+
+    parser.add_argument(
+        "--no-verify-ssl", action="store_true", help="Disable SSL certificate verification"
+    )
+    parser.add_argument(
+        "--host-pattern",
+        dest="host_patterns",
+        action="append",
+        default=[],
+        help="Regex matched against a host's displayName. Repeatable.",
+    )
+    parser.add_argument(
+        "--service-pattern",
+        dest="service_patterns",
+        action="append",
+        default=[],
+        help="Regex matched against a service's displayName. Repeatable.",
+    )
+    parser.add_argument("--downtime-handling", choices=["ok", "original"], default="ok")
+    parser.add_argument("--ack-handling", choices=["ok", "original"], default="ok")
+    parser.add_argument("--staleness-warn", type=int, default=None, help="Seconds")
+    parser.add_argument("--staleness-crit", type=int, default=None, help="Seconds")
+    parser.add_argument("--page-size", type=int, default=100)
+    parser.add_argument("--host-batch-size", type=int, default=50)
+    parser.add_argument("--timeout", type=float, default=30, help="HTTP read timeout in seconds")
+    parser.add_argument("--debug", action="store_true", help="Verbose diagnostics on stderr")
+    parser.add_argument(
+        "--replay-dir",
+        help="Serve hosts.json/services.json from this directory instead of querying HLMON",
+    )
+    parser.add_argument(
+        "--dump-dir",
+        help="Save raw hosts/services responses here, in --replay-dir's fixture format",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    global DEBUG
+    args = _parse_args(argv)
+    DEBUG = args.debug
+
+    if not args.host_patterns:
+        sys.exit("agent_hlmm: at least one --host-pattern is required")
+    if not args.service_patterns:
+        sys.exit("agent_hlmm: at least one --service-pattern is required")
+
+    if args.replay_dir:
+        client = ReplayClient(args.replay_dir)
+    else:
+        if not args.url or not args.username:
+            sys.exit("agent_hlmm: --url and --username are required (unless --replay-dir is used)")
+        password = _resolve_password(args)
+        if not password:
+            sys.exit("agent_hlmm: no password provided via --password-ref, --password or stdin")
+        client = HlmmClient(
+            args.url,
+            args.username,
+            password,
+            verify_ssl=not args.no_verify_ssl,
+            timeout=(10, args.timeout),
+            page_size=args.page_size,
+        )
+
+    errors = []
+    started = time.monotonic()
+
+    raw_hosts, matched_hosts = resolve_hosts(client, args.host_patterns, errors)
+    hosts_by_id = {h["id"]: h for h in matched_hosts}
+
+    raw_services = fetch_services_for_hosts(
+        client, list(hosts_by_id), errors, batch_size=args.host_batch_size
+    )
+    matched_services = filter_services(raw_services, args.service_patterns, errors)
+
+    if args.dump_dir:
+        _dump_raw(args.dump_dir, raw_hosts, raw_services)
+
+    grouped = _group_services_by_host(matched_services, hosts_by_id)
+    config = build_check_config(args)
+    for display_name, payloads in grouped.items():
+        emit_piggyback(display_name, config, payloads)
+
+    status = {
+        "queried_at": datetime.now(timezone.utc).astimezone().isoformat(),
+        "duration_seconds": round(time.monotonic() - started, 3),
+        "hosts_total": len(raw_hosts),
+        "hosts_matched": len(matched_hosts),
+        "services_fetched": len(raw_services),
+        "services_matched": len(matched_services),
+        "targets_emitted": len(grouped),
+        "errors": errors,
+    }
+    emit_status(status)
+
+
+if __name__ == "__main__":
+    main()

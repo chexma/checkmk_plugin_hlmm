@@ -1,0 +1,42 @@
+title: HLMM Service Status
+agents: hlmm
+catalog: os/services
+license: GPLv2
+distribution: check_mk
+description:
+ This check imports the status of a service monitored by the HLMON
+ monitoring system and shows it as a Checkmk service.
+
+ The check maps HLMON's {lastState} to Checkmk states:
+ OK → {OK}, WARNING → {WARN}, CRITICAL → {CRIT}, UNKNOWN → {UNKNOWN}.
+ Any other value also results in {UNKNOWN}.
+
+ If HLMON reports the service as being in downtime or as acknowledged,
+ that is always shown in the check output. Whether it also forces the
+ Checkmk state to {OK} is controlled by the "Effect of HLMON downtime /
+ acknowledgement on the Checkmk service state" options of the special
+ agent rule (default: forced to {OK} for both).
+
+ A second line reports how long ago HLMON last checked the service. If
+ the special agent rule configures age thresholds ("Age of last HLMON
+ check"), exceeding them raises the state to {WARN} or {CRIT};
+ otherwise the age is shown without affecting the state.
+
+ If a service that was previously discovered is no longer reported by
+ HLMON (e.g. it was deleted there, or no longer matches the configured
+ service name patterns), the check goes {UNKNOWN}.
+
+ Requires the HLMON special agent to be configured on a "collector"
+ host; services are attached via piggyback to the Checkmk host that
+ shares its name with the HLMON host's displayName.
+
+item:
+ The HLMON service's displayName. If two services on the same host
+ share the same displayName, the second and further occurrences get
+ the HLMON service id appended in parentheses, e.g. "myservice (1002)",
+ so they are not merged into a single item.
+
+discovery:
+ One service is created per HLMON service that matches the special
+ agent rule's service name patterns, for hosts that also matched the
+ configured host name patterns.
