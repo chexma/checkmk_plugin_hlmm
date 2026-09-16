@@ -273,6 +273,7 @@ def build_check_config(args):
     the section payload itself instead.
     """
     return {
+        "service_prefix": args.service_prefix,
         "downtime_handling": args.downtime_handling,
         "ack_handling": args.ack_handling,
         "staleness_warn": args.staleness_warn,
@@ -374,6 +375,12 @@ def _parse_args(argv):
         action="append",
         default=[],
         help="Regex matched against a service's displayName. Repeatable.",
+    )
+    parser.add_argument(
+        "--service-prefix",
+        default="HLMM ",
+        help="Prepended to each imported service's displayName to form the Checkmk "
+        "item. Pass an empty string for no prefix.",
     )
     parser.add_argument("--downtime-handling", choices=["ok", "original"], default="ok")
     parser.add_argument("--ack-handling", choices=["ok", "original"], default="ok")

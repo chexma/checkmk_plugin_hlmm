@@ -1,0 +1,6 @@
+- Performance Daten beim Query Status
+    - Hosts, Services, Laufzeit
+- Was ist bei mehreren Regeln für unterschiedliche Host/Pattern Kombinationen ?
+- Prefix auswählbar (auch keins)
+- Angabe von "Letzter Check vor:" nur, wenn Warn oder Crit, sonst in nur in den Details
+- Was gibt es noch für Möglichkeiten der Verbesserung ?

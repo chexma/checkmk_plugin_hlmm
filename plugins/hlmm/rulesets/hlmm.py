@@ -28,7 +28,15 @@ def _special_agent_formspec():
             "name patterns, and imports their services as Checkmk services on the "
             "same-named hosts (via piggyback). This rule is assigned to a single "
             "'collector' host that runs the special agent -- see "
-            "plans/2026-09-16-hlmm-plugin-konzept.md for the full design."
+            "plans/2026-09-16-hlmm-plugin-konzept.md for the full design.\n\n"
+            "Multiple host/service pattern combinations for the SAME collector host "
+            "belong in ONE rule (add several entries to 'Host name patterns' / "
+            "'Service name patterns' -- matching is OR across all of them), not in "
+            "several separate rules: Checkmk special agent rules use first-match-wins "
+            "per host, so only one rule's parameters take effect per collector host. "
+            "Use a different collector host (and its own rule) for a genuinely "
+            "independent host/pattern combination; 'Service name prefix' below can then "
+            "distinguish which rule a given imported service came from."
         ),
         elements={
             "server_url": DictElement(
@@ -100,6 +108,20 @@ def _special_agent_formspec():
                     element_template=String(title=Title("Pattern (Python regex)")),
                     custom_validate=(validators.LengthInRange(min_value=1),),
                     add_element_label=Label("Add pattern"),
+                ),
+            ),
+            "service_prefix": DictElement(
+                required=True,
+                parameter_form=String(
+                    title=Title("Service name prefix"),
+                    help_text=Help(
+                        "Prepended to each imported service's displayName to form the "
+                        "Checkmk service name, e.g. 'HLMM ' -> 'HLMM myservice'. Leave "
+                        "empty for no prefix at all. Useful to tell services imported by "
+                        "different special agent rules (e.g. different host/service "
+                        "pattern combinations) apart."
+                    ),
+                    prefill=DefaultValue("HLMM "),
                 ),
             ),
             "downtime_handling": DictElement(

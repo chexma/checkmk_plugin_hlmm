@@ -14,6 +14,7 @@ from datetime import datetime
 from cmk.agent_based.v2 import (
     AgentSection,
     CheckPlugin,
+    Metric,
     Result,
     Service,
     State,
@@ -29,6 +30,7 @@ _STATE_MAP = {
 }
 
 _DEFAULT_CONFIG = {
+    "service_prefix": "HLMM ",
     "downtime_handling": "ok",
     "ack_handling": "ok",
     "staleness_warn": None,
@@ -45,8 +47,13 @@ def _parse_json_section(string_table):
         return None
 
 
-def _assign_items(services):
+def _assign_items(services, prefix):
     """Assign a unique CheckMK item name to every service.
+
+    `prefix` (the special agent's "Service name prefix" setting, possibly
+    empty) is prepended to every item -- the service_name template itself is
+    just "%s" (see check_plugin_hlmm_services) since a CheckPlugin's
+    service_name is a fixed string and can't read per-rule configuration.
 
     Two services on the same host can share a displayName; the second (and
     further) occurrence gets its HLMON service id appended so discovery
@@ -55,7 +62,8 @@ def _assign_items(services):
     """
     seen = {}
     for svc in services:
-        base = svc.get("displayName") or f"service-{svc.get('id')}"
+        name = svc.get("displayName") or f"service-{svc.get('id')}"
+        base = f"{prefix}{name}"
         seen[base] = seen.get(base, 0) + 1
         svc["_item"] = base if seen[base] == 1 else f"{base} ({svc['id']})"
     return services
@@ -65,15 +73,15 @@ def parse_hlmm_services(string_table):
     """Parse the {"config": {...}, "services": [...]} payload from agent_hlmm.
 
     The config is embedded in the section itself (not a separate CheckMK
-    check-parameter ruleset) because downtime/ack handling and staleness
-    thresholds are special-agent settings, not per-service check parameters
-    -- see build_check_config() in agent_hlmm.
+    check-parameter ruleset) because downtime/ack handling, the service name
+    prefix, and staleness thresholds are special-agent settings, not
+    per-service check parameters -- see build_check_config() in agent_hlmm.
     """
     raw = _parse_json_section(string_table)
     if raw is None:
         return None
     config = {**_DEFAULT_CONFIG, **(raw.get("config") or {})}
-    services = _assign_items(list(raw.get("services") or []))
+    services = _assign_items(list(raw.get("services") or []), config["service_prefix"])
     return {"config": config, "services": services}
 
 
@@ -91,19 +99,20 @@ def _find_service(section, item):
 def _check_staleness(timestamp, config):
     """Report the age of the last HLMON check for this service.
 
-    Always shown (even when fresh/OK) so a stopped HLMON feed is visible
-    per-service, not just via the collector-wide hlmm_status check. Levels
-    are only applied when both staleness_warn and staleness_crit are set;
-    otherwise the age is shown without escalating the state.
+    Only shown in the summary when it's actually a problem (WARN/CRIT); a
+    fresh/OK age is still available in the details, just not cluttering the
+    summary line. Levels are only applied when both staleness_warn and
+    staleness_crit are set; otherwise the age is shown (details-only) without
+    escalating the state.
     """
     if not timestamp:
-        yield Result(state=State.OK, summary="Letzter Check: unbekannt")
+        yield Result(state=State.OK, notice="Letzter Check: unbekannt")
         return
 
     try:
         checked_at = datetime.fromisoformat(timestamp)
     except ValueError:
-        yield Result(state=State.OK, summary=f"Letzter Check: {timestamp} (Format unbekannt)")
+        yield Result(state=State.OK, notice=f"Letzter Check: {timestamp} (Format unbekannt)")
         return
 
     now = datetime.now(checked_at.tzinfo) if checked_at.tzinfo else datetime.now()
@@ -112,7 +121,7 @@ def _check_staleness(timestamp, config):
     warn = config.get("staleness_warn")
     crit = config.get("staleness_crit")
     if warn is None or crit is None:
-        yield Result(state=State.OK, summary=f"Letzter Check vor {render.timespan(delta)}")
+        yield Result(state=State.OK, notice=f"Letzter Check vor {render.timespan(delta)}")
         return
 
     yield from check_levels(
@@ -120,6 +129,7 @@ def _check_staleness(timestamp, config):
         levels_upper=("fixed", (warn, crit)),
         render_func=render.timespan,
         label="Letzter Check vor",
+        notice_only=True,
     )
 
 
@@ -161,7 +171,10 @@ agent_section_hlmm_services = AgentSection(
 
 check_plugin_hlmm_services = CheckPlugin(
     name="hlmm_services",
-    service_name="HLMM %s",
+    # The prefix ("HLMM " by default, configurable, can be empty) is baked
+    # into the item itself by _assign_items() -- service_name can't read
+    # per-rule configuration, it's a fixed template.
+    service_name="%s",
     discovery_function=discover_hlmm_services,
     check_function=check_hlmm_services,
 )
@@ -207,6 +220,11 @@ def check_hlmm_status(section):
 
     details = "\n".join(f"{e.get('stage')}: {e.get('detail')}" for e in errors) or None
     yield Result(state=state, summary=summary, details=details)
+
+    yield Metric("hlmm_status_hosts_matched", hosts_matched)
+    yield Metric("hlmm_status_services_matched", services_matched)
+    if duration is not None:
+        yield Metric("hlmm_status_duration", duration)
 
 
 agent_section_hlmm_status = AgentSection(

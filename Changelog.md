@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## 0.0.4 (2026-09-16)
+
+Addresses the open items from `ToDO`:
+
+- **Configurable service name prefix.** New special agent setting "Service
+  name prefix" (default `"HLMM "`, can be empty for none). Since a
+  `CheckPlugin`'s `service_name` is a fixed template and can't read per-rule
+  configuration, the prefix now travels through the section's embedded
+  `config` (like downtime/ack handling and staleness thresholds already did)
+  and is baked into the item by the check plugin; `service_name` changed
+  from `"HLMM %s"` to `"%s"` accordingly. Useful to tell services imported
+  by different special agent rules (different host/service pattern
+  combinations) apart.
+- **Documented multiple-rules behavior.** Added ruleset help text explaining
+  that multiple host/service pattern combinations for the *same* collector
+  host belong in one rule (the pattern lists are OR-matched), not several
+  separate rules — Checkmk special agent rules are first-match-wins per
+  host, so only one rule's parameters would take effect. Use a separate
+  collector host (with its own rule and, if useful, a distinct service
+  prefix) for a genuinely independent combination.
+- **"Last check ago" no longer clutters the summary when it's not a
+  problem.** `HLMM Service Status`'s staleness line now uses `notice=`
+  instead of `summary=` (and `check_levels(..., notice_only=True)` for the
+  thresholded case), so it only appears in the summary when it's actually
+  WARN/CRIT; otherwise it's still available in the details.
+- **Performance data for `HLMM Query Status`.** New metrics
+  `hlmm_status_hosts_matched`, `hlmm_status_services_matched`,
+  `hlmm_status_duration`, plus a `graphing/hlmm.py` for readable titles and
+  a combined graph — emitted whenever the special agent produced any status
+  data, including the CRIT/WARN cases, so a gradually failing HLMON query
+  becomes visible in a trend graph before it's a hard failure.
+
 ## 0.0.3 (2026-09-16)
 
 - Fixed: `verify_ssl=False` was silently ignored on real Checkmk sites even

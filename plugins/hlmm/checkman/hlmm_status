@@ -26,6 +26,12 @@ description:
  If the special agent produced no status data at all (e.g. it crashed
  before completing), the check goes {UNKNOWN}.
 
+ Performance data ({hlmm_status_hosts_matched}, {hlmm_status_services_matched},
+ {hlmm_status_duration}) is attached whenever the special agent produced
+ any status data, even in the {CRIT}/{WARN} cases -- so a graph of hosts
+ or services matched over time can make e.g. a gradually failing HLMON
+ query visible before it becomes a hard failure.
+
 discovery:
  One service is created once the special agent has produced any status
  data.

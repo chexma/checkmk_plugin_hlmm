@@ -20,6 +20,11 @@ def _agent_arguments(params, host_config):
     for pattern in params.get("service_patterns", []):
         args.extend(["--service-pattern", pattern])
 
+    # Note: "" (no prefix) is a valid, intentional value -- must not be
+    # treated as falsy/absent here.
+    if "service_prefix" in params:
+        args.extend(["--service-prefix", params["service_prefix"]])
+
     if "downtime_handling" in params:
         args.extend(["--downtime-handling", params["downtime_handling"]])
 
