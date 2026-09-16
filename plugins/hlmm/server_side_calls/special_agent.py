@@ -14,8 +14,14 @@ def _agent_arguments(params, host_config):
     if not params.get("verify_ssl", True):
         args.append("--no-verify-ssl")
 
-    for pattern in params.get("host_patterns", []):
-        args.extend(["--host-pattern", pattern])
+    # host_patterns is a CascadingSingleChoice: ("patterns", [regex, ...]) or
+    # ("all", None) for no filtering at all.
+    host_mode, host_value = params.get("host_patterns", ("patterns", []))
+    if host_mode == "all":
+        args.append("--all-hosts")
+    else:
+        for pattern in host_value or []:
+            args.extend(["--host-pattern", pattern])
 
     for pattern in params.get("service_patterns", []):
         args.extend(["--service-pattern", pattern])

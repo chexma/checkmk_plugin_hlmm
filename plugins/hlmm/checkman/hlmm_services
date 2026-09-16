@@ -33,6 +33,10 @@ description:
  host; services are attached via piggyback to the Checkmk host that
  shares its name with the HLMON host's displayName.
 
+ The special agent rule's "Hosts to import" setting controls which HLMON
+ hosts are considered at all: either name patterns (as above), or "All
+ hosts" to import every HLMON host regardless of name.
+
 item:
  The special agent rule's configured "Service name prefix" (default
  "HLMM ", can be set to empty for no prefix -- useful to tell services

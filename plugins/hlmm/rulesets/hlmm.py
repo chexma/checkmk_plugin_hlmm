@@ -3,9 +3,12 @@
 from cmk.rulesets.v1 import Help, Label, Title
 from cmk.rulesets.v1.form_specs import (
     BooleanChoice,
+    CascadingSingleChoice,
+    CascadingSingleChoiceElement,
     DefaultValue,
     DictElement,
     Dictionary,
+    FixedValue,
     Float,
     LevelDirection,
     List,
@@ -82,18 +85,40 @@ def _special_agent_formspec():
             ),
             "host_patterns": DictElement(
                 required=True,
-                parameter_form=List(
-                    title=Title("Host name patterns"),
+                parameter_form=CascadingSingleChoice(
+                    title=Title("Hosts to import"),
                     help_text=Help(
-                        "Regular expressions matched against each HLMON host's "
-                        "displayName (its human-readable name, which is expected to "
-                        "match the Checkmk hostname -- not HLMON's internal name "
-                        "field). A host is resolved if it matches any of the "
-                        "patterns. Example: server-oracle, server-windows"
+                        "Which HLMON hosts to resolve (matching is always against "
+                        "displayName, the human-readable name expected to match the "
+                        "Checkmk hostname -- not HLMON's internal name field)."
                     ),
-                    element_template=String(title=Title("Pattern (Python regex)")),
-                    custom_validate=(validators.LengthInRange(min_value=1),),
-                    add_element_label=Label("Add pattern"),
+                    elements=[
+                        CascadingSingleChoiceElement(
+                            name="patterns",
+                            title=Title("Match by name pattern"),
+                            parameter_form=List(
+                                title=Title("Host name patterns"),
+                                help_text=Help(
+                                    "Regular expressions matched against each HLMON "
+                                    "host's displayName. A host is resolved if it "
+                                    "matches any of the patterns. Example: "
+                                    "server-oracle, server-windows"
+                                ),
+                                element_template=String(title=Title("Pattern (Python regex)")),
+                                custom_validate=(validators.LengthInRange(min_value=1),),
+                                add_element_label=Label("Add pattern"),
+                            ),
+                        ),
+                        CascadingSingleChoiceElement(
+                            name="all",
+                            title=Title("All hosts (no filtering)"),
+                            parameter_form=FixedValue(
+                                value=None,
+                                label=Label("Every host HLMON reports is resolved"),
+                            ),
+                        ),
+                    ],
+                    prefill=DefaultValue("patterns"),
                 ),
             ),
             "service_patterns": DictElement(

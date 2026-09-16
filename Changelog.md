@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 0.0.5 (2026-09-16)
+
+- **"All hosts" option for host selection.** "Hosts to import" in the
+  special agent rule is now a choice between "Match by name pattern" (as
+  before) and "All hosts (no filtering)". Implemented as an explicit mode
+  (`resolve_hosts(..., match_all=True)`, agent CLI flag `--all-hosts`), not
+  a documented `.*` regex trick — bypasses pattern compilation entirely, and
+  any `--host-pattern` values are ignored when `--all-hosts` is set.
+
 ## 0.0.4 (2026-09-16)
 
 Addresses the open items from `ToDO`:

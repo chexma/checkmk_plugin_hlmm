@@ -179,13 +179,18 @@ def _matches_any(name, compiled_patterns):
     return any(p.search(name) for p in compiled_patterns)
 
 
-def resolve_hosts(client, patterns, errors):
+def resolve_hosts(client, patterns, errors, match_all=False):
     """Resolve HLMON hosts whose displayName matches any of `patterns`.
 
-    Matching always happens against `displayName` (falling back to `name`
-    only when displayName is missing/empty) — see the concept doc, section 4,
-    for why: `name` is HLMON's opaque internal identifier, `displayName` is
-    the human-readable name that matches CheckMK hostnames.
+    If `match_all` is set, every host is matched and `patterns` is ignored
+    entirely -- this is a distinct, explicit mode (not just "pass '.*'"),
+    selected via the ruleset's "Hosts to import" -> "All hosts" option.
+
+    Matching (when not match_all) always happens against `displayName`
+    (falling back to `name` only when displayName is missing/empty) — see
+    the concept doc, section 4, for why: `name` is HLMON's opaque internal
+    identifier, `displayName` is the human-readable name that matches
+    CheckMK hostnames.
 
     Returns (raw_hosts, matched): `raw_hosts` is the unfiltered response from
     /hosts (used by --dump-dir so captured fixtures can later be replayed
@@ -197,6 +202,14 @@ def resolve_hosts(client, patterns, errors):
     hosts, error = client.get_all("/hosts")
     if error:
         errors.append({"stage": "hosts", "detail": error})
+
+    if match_all:
+        matched = [
+            {"id": host["id"], "display_name": host.get("displayName") or host.get("name") or ""}
+            for host in hosts
+        ]
+        log_debug(f"resolve_hosts: {len(hosts)} hosts fetched, match_all -> {len(matched)} matched")
+        return hosts, matched
 
     compiled = _compile_patterns(patterns, errors)
     if not compiled:
@@ -367,7 +380,13 @@ def _parse_args(argv):
         dest="host_patterns",
         action="append",
         default=[],
-        help="Regex matched against a host's displayName. Repeatable.",
+        help="Regex matched against a host's displayName. Repeatable. Ignored if "
+        "--all-hosts is set.",
+    )
+    parser.add_argument(
+        "--all-hosts",
+        action="store_true",
+        help="Resolve every HLMON host, bypassing --host-pattern filtering entirely.",
     )
     parser.add_argument(
         "--service-pattern",
@@ -406,8 +425,8 @@ def main(argv=None):
     args = _parse_args(argv)
     DEBUG = args.debug
 
-    if not args.host_patterns:
-        sys.exit("agent_hlmm: at least one --host-pattern is required")
+    if not args.all_hosts and not args.host_patterns:
+        sys.exit("agent_hlmm: at least one --host-pattern is required (unless --all-hosts is set)")
     if not args.service_patterns:
         sys.exit("agent_hlmm: at least one --service-pattern is required")
 
@@ -431,7 +450,9 @@ def main(argv=None):
     errors = []
     started = time.monotonic()
 
-    raw_hosts, matched_hosts = resolve_hosts(client, args.host_patterns, errors)
+    raw_hosts, matched_hosts = resolve_hosts(
+        client, args.host_patterns, errors, match_all=args.all_hosts
+    )
     hosts_by_id = {h["id"]: h for h in matched_hosts}
 
     raw_services = fetch_services_for_hosts(
