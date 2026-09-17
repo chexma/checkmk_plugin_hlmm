@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import json
+
 from cmk.server_side_calls.v1 import SpecialAgentCommand, SpecialAgentConfig, noop_parser
 
 
@@ -14,17 +16,19 @@ def _agent_arguments(params, host_config):
     if not params.get("verify_ssl", True):
         args.append("--no-verify-ssl")
 
-    # host_patterns is a CascadingSingleChoice: ("patterns", [regex, ...]) or
-    # ("all", None) for no filtering at all.
-    host_mode, host_value = params.get("host_patterns", ("patterns", []))
-    if host_mode == "all":
-        args.append("--all-hosts")
-    else:
-        for pattern in host_value or []:
-            args.extend(["--host-pattern", pattern])
-
-    for pattern in params.get("service_patterns", []):
-        args.extend(["--service-pattern", pattern])
+    # Each host_service_mappings entry is {"hosts": ("patterns", [regex, ...])
+    # or ("all", None), "service_patterns": [regex, ...]}. Serialized as one
+    # JSON object per --mapping flag so agent_hlmm can scope each entry's
+    # service patterns to only the hosts that entry's host patterns matched.
+    for mapping in params.get("host_service_mappings", []):
+        host_mode, host_value = mapping.get("hosts", ("patterns", []))
+        payload = {"service_patterns": mapping.get("service_patterns", [])}
+        if host_mode == "all":
+            payload["all_hosts"] = True
+        else:
+            payload["all_hosts"] = False
+            payload["host_patterns"] = host_value or []
+        args.extend(["--mapping", json.dumps(payload, separators=(",", ":"))])
 
     # Note: "" (no prefix) is a valid, intentional value -- must not be
     # treated as falsy/absent here.

@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## 0.0.8 (2026-09-17)
+
+- **Grouped host/service pattern mappings.** The special agent ruleset's
+  "Host name patterns" and "Service name patterns" fields (each a single,
+  global list combined as a cross-product) are replaced by a new "Host /
+  service pattern mappings" list: each entry pairs its own "Hosts to
+  import" (name patterns, or "All hosts") with the service-name patterns
+  that apply only to hosts matched by that entry. A host matched by more
+  than one entry gets the union of every matching entry's service
+  patterns. This lets one collector host cleanly express independent
+  host/service pattern groups (e.g. Oracle hosts -> `orcl` patterns,
+  Windows hosts -> `disk`/`cpu` patterns) in a single rule, instead of the
+  old global cross-product where every host pattern was checked against
+  every service pattern.
+- Agent-side: `resolve_hosts()`/`filter_services()` (global pattern list)
+  are replaced by `resolve_mappings()`/`filter_services_by_host()`, which
+  track the service patterns that apply per resolved host id. The special
+  agent CLI accordingly replaces the old `--host-pattern`/`--all-hosts`/
+  `--service-pattern` flags with a repeatable `--mapping` flag carrying one
+  JSON object per mapping entry (see `agent_hlmm --help`).
+- No parameter migration is provided for existing saved rules using the old
+  `host_patterns`/`service_patterns` keys — re-save affected rules with the
+  new "Host / service pattern mappings" list after upgrading.
+
 ## 0.0.7 (2026-09-16)
 
 Extends the plugin using previously unused fields identified from a real

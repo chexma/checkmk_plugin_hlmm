@@ -33,10 +33,12 @@ def _special_agent_formspec():
             "'collector' host that runs the special agent -- see "
             "plans/2026-09-16-hlmm-plugin-konzept.md for the full design.\n\n"
             "Multiple host/service pattern combinations for the SAME collector host "
-            "belong in ONE rule (add several entries to 'Host name patterns' / "
-            "'Service name patterns' -- matching is OR across all of them), not in "
-            "several separate rules: Checkmk special agent rules use first-match-wins "
-            "per host, so only one rule's parameters take effect per collector host. "
+            "belong in ONE rule (add several entries to 'Host / service pattern "
+            "mappings' below -- each entry's service patterns apply only to hosts "
+            "matched by that entry's host patterns, and a host matched by more than "
+            "one entry gets the union of their service patterns), not in several "
+            "separate rules: Checkmk special agent rules use first-match-wins per "
+            "host, so only one rule's parameters take effect per collector host. "
             "Use a different collector host (and its own rule) for a genuinely "
             "independent host/pattern combination; 'Service name prefix' below can then "
             "distinguish which rule a given imported service came from."
@@ -83,56 +85,88 @@ def _special_agent_formspec():
                     label=Label("Verify SSL certificate"),
                 ),
             ),
-            "host_patterns": DictElement(
-                required=True,
-                parameter_form=CascadingSingleChoice(
-                    title=Title("Hosts to import"),
-                    help_text=Help(
-                        "Which HLMON hosts to resolve (matching is always against "
-                        "displayName, the human-readable name expected to match the "
-                        "Checkmk hostname -- not HLMON's internal name field)."
-                    ),
-                    elements=[
-                        CascadingSingleChoiceElement(
-                            name="patterns",
-                            title=Title("Match by name pattern"),
-                            parameter_form=List(
-                                title=Title("Host name patterns"),
-                                help_text=Help(
-                                    "Regular expressions matched against each HLMON "
-                                    "host's displayName. A host is resolved if it "
-                                    "matches any of the patterns. Example: "
-                                    "server-oracle, server-windows"
-                                ),
-                                element_template=String(title=Title("Pattern (Python regex)")),
-                                custom_validate=(validators.LengthInRange(min_value=1),),
-                                add_element_label=Label("Add pattern"),
-                            ),
-                        ),
-                        CascadingSingleChoiceElement(
-                            name="all",
-                            title=Title("All hosts (no filtering)"),
-                            parameter_form=FixedValue(
-                                value=None,
-                                label=Label("Every host HLMON reports is resolved"),
-                            ),
-                        ),
-                    ],
-                    prefill=DefaultValue("patterns"),
-                ),
-            ),
-            "service_patterns": DictElement(
+            "host_service_mappings": DictElement(
                 required=True,
                 parameter_form=List(
-                    title=Title("Service name patterns"),
+                    title=Title("Host / service pattern mappings"),
                     help_text=Help(
-                        "Regular expressions matched against each HLMON service's "
-                        "displayName. A service is imported if it matches any of the "
-                        "patterns. Example: orcl"
+                        "Each entry pairs a set of HLMON host-name patterns with the "
+                        "service-name patterns to import for hosts matched by that "
+                        "entry. A host matched by more than one entry gets the union "
+                        "of every matching entry's service patterns. Example: entry 1 "
+                        "matches hosts 'server-oracle' with service pattern 'orcl'; "
+                        "entry 2 matches hosts 'server-windows' with service patterns "
+                        "'disk', 'cpu'."
                     ),
-                    element_template=String(title=Title("Pattern (Python regex)")),
+                    element_template=Dictionary(
+                        elements={
+                            "hosts": DictElement(
+                                required=True,
+                                parameter_form=CascadingSingleChoice(
+                                    title=Title("Hosts to import"),
+                                    help_text=Help(
+                                        "Which HLMON hosts this entry applies to "
+                                        "(matching is always against displayName, the "
+                                        "human-readable name expected to match the "
+                                        "Checkmk hostname -- not HLMON's internal name "
+                                        "field)."
+                                    ),
+                                    elements=[
+                                        CascadingSingleChoiceElement(
+                                            name="patterns",
+                                            title=Title("Match by name pattern"),
+                                            parameter_form=List(
+                                                title=Title("Host name patterns"),
+                                                help_text=Help(
+                                                    "Regular expressions matched "
+                                                    "against each HLMON host's "
+                                                    "displayName. A host is resolved "
+                                                    "if it matches any of the "
+                                                    "patterns. Example: server-oracle, "
+                                                    "server-windows"
+                                                ),
+                                                element_template=String(
+                                                    title=Title("Pattern (Python regex)")
+                                                ),
+                                                custom_validate=(
+                                                    validators.LengthInRange(min_value=1),
+                                                ),
+                                                add_element_label=Label("Add pattern"),
+                                            ),
+                                        ),
+                                        CascadingSingleChoiceElement(
+                                            name="all",
+                                            title=Title("All hosts (no filtering)"),
+                                            parameter_form=FixedValue(
+                                                value=None,
+                                                label=Label("Every host HLMON reports is resolved"),
+                                            ),
+                                        ),
+                                    ],
+                                    prefill=DefaultValue("patterns"),
+                                ),
+                            ),
+                            "service_patterns": DictElement(
+                                required=True,
+                                parameter_form=List(
+                                    title=Title("Service name patterns"),
+                                    help_text=Help(
+                                        "Regular expressions matched against each "
+                                        "HLMON service's displayName. Applied only to "
+                                        "hosts matched by this entry's 'Hosts to "
+                                        "import' setting above. A service is imported "
+                                        "if it matches any of the patterns. Example: "
+                                        "orcl"
+                                    ),
+                                    element_template=String(title=Title("Pattern (Python regex)")),
+                                    custom_validate=(validators.LengthInRange(min_value=1),),
+                                    add_element_label=Label("Add pattern"),
+                                ),
+                            ),
+                        },
+                    ),
                     custom_validate=(validators.LengthInRange(min_value=1),),
-                    add_element_label=Label("Add pattern"),
+                    add_element_label=Label("Add mapping"),
                 ),
             ),
             "service_prefix": DictElement(

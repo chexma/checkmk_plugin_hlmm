@@ -179,52 +179,88 @@ def _matches_any(name, compiled_patterns):
     return any(p.search(name) for p in compiled_patterns)
 
 
-def resolve_hosts(client, patterns, errors, match_all=False):
-    """Resolve HLMON hosts whose displayName matches any of `patterns`.
+def parse_mappings(raw_mappings, errors):
+    """Parse --mapping JSON strings into {"host_patterns", "all_hosts", "service_patterns"} dicts.
 
-    If `match_all` is set, every host is matched and `patterns` is ignored
-    entirely -- this is a distinct, explicit mode (not just "pass '.*'"),
-    selected via the ruleset's "Hosts to import" -> "All hosts" option.
+    A mapping that fails to parse as JSON is skipped (reported in `errors`),
+    not fatal -- consistent with how a broken regex pattern is handled.
+    """
+    mappings = []
+    for raw in raw_mappings:
+        try:
+            mapping = json.loads(raw)
+        except ValueError as exc:
+            errors.append({"stage": "mapping", "detail": f"Invalid --mapping JSON {raw!r}: {exc}"})
+            continue
+        mappings.append(
+            {
+                "host_patterns": mapping.get("host_patterns") or [],
+                "all_hosts": bool(mapping.get("all_hosts")),
+                "service_patterns": mapping.get("service_patterns") or [],
+            }
+        )
+    return mappings
 
-    Matching (when not match_all) always happens against `displayName`
-    (falling back to `name` only when displayName is missing/empty) — see
-    the concept doc, section 4, for why: `name` is HLMON's opaque internal
-    identifier, `displayName` is the human-readable name that matches
-    CheckMK hostnames.
 
-    Returns (raw_hosts, matched): `raw_hosts` is the unfiltered response from
-    /hosts (used by --dump-dir so captured fixtures can later be replayed
-    against different --host-pattern values), `matched` is a list of
-    {"id": ..., "display_name": ...} for hosts that matched a pattern. Never
-    raises; HTTP and pattern errors are appended to `errors` and the
+def resolve_mappings(client, mappings, errors):
+    """Resolve HLMON hosts and, per host, the service patterns that apply to it.
+
+    Each mapping pairs a set of host-name patterns (or `all_hosts`) with the
+    service-name patterns that apply only to hosts it matches -- this is what
+    lets one rule express independent host-pattern / service-pattern groups
+    (see the ruleset's "Host / service pattern mappings" help text). A host
+    matched by more than one mapping gets the union of every matching
+    mapping's service patterns.
+
+    Matching always happens against `displayName` (falling back to `name`
+    only when displayName is missing/empty) — see the concept doc, section
+    4, for why: `name` is HLMON's opaque internal identifier, `displayName`
+    is the human-readable name that matches CheckMK hostnames.
+
+    Returns (raw_hosts, matched, host_service_patterns):
+    - `raw_hosts`: the unfiltered response from /hosts (used by --dump-dir
+      so captured fixtures can later be replayed against different
+      --mapping values).
+    - `matched`: a deduplicated list of {"id": ..., "display_name": ...} for
+      every host matched by at least one mapping.
+    - `host_service_patterns`: {host_id: set_of_pattern_strings}, the union
+      of service patterns from every mapping that matched that host.
+
+    Never raises; HTTP and pattern errors are appended to `errors` and the
     function degrades to an empty/partial result instead.
     """
     hosts, error = client.get_all("/hosts")
     if error:
         errors.append({"stage": "hosts", "detail": error})
 
-    if match_all:
-        matched = [
-            {"id": host["id"], "display_name": host.get("displayName") or host.get("name") or ""}
-            for host in hosts
-        ]
-        log_debug(f"resolve_hosts: {len(hosts)} hosts fetched, match_all -> {len(matched)} matched")
-        return hosts, matched
+    matched_by_id = {}
+    host_service_patterns = {}
 
-    compiled = _compile_patterns(patterns, errors)
-    if not compiled:
-        return hosts, []
+    for mapping in mappings:
+        if mapping["all_hosts"]:
+            candidates = hosts
+        else:
+            compiled = _compile_patterns(mapping["host_patterns"], errors)
+            if not compiled:
+                continue
+            candidates = [
+                host
+                for host in hosts
+                if _matches_any(host.get("displayName") or host.get("name") or "", compiled)
+            ]
 
-    matched = [
-        {"id": host["id"], "display_name": host.get("displayName") or host.get("name") or ""}
-        for host in hosts
-        if _matches_any(host.get("displayName") or host.get("name") or "", compiled)
-    ]
+        for host in candidates:
+            host_id = host["id"]
+            display_name = host.get("displayName") or host.get("name") or ""
+            matched_by_id.setdefault(host_id, {"id": host_id, "display_name": display_name})
+            host_service_patterns.setdefault(host_id, set()).update(mapping["service_patterns"])
+
+    matched = list(matched_by_id.values())
     log_debug(
-        f"resolve_hosts: {len(hosts)} hosts fetched, {len(matched)} matched "
-        f"patterns={patterns!r}"
+        f"resolve_mappings: {len(hosts)} hosts fetched, {len(mappings)} mappings, "
+        f"{len(matched)} matched"
     )
-    return hosts, matched
+    return hosts, matched, host_service_patterns
 
 
 def fetch_services_for_hosts(client, host_ids, errors, batch_size=50):
@@ -243,19 +279,28 @@ def fetch_services_for_hosts(client, host_ids, errors, batch_size=50):
     return services
 
 
-def filter_services(services, patterns, errors):
-    """Keep only services whose displayName (fallback: name) matches any pattern."""
-    compiled = _compile_patterns(patterns, errors)
-    if not compiled:
-        return []
+def filter_services_by_host(services, host_service_patterns, errors):
+    """Keep services matching the service patterns that apply to their own host.
 
-    matched = [
-        s for s in services if _matches_any(s.get("displayName") or s.get("name") or "", compiled)
-    ]
-    log_debug(
-        f"filter_services: {len(services)} fetched, {len(matched)} matched "
-        f"patterns={patterns!r}"
-    )
+    `host_service_patterns` maps a host id to the union of service-pattern
+    strings from every mapping that matched that host (see
+    resolve_mappings()) -- a service is kept only if it matches one of ITS
+    host's patterns, not some global list, which is what scopes a mapping's
+    service patterns to the host-pattern group they were configured under.
+    """
+    compiled_by_host = {}
+    matched = []
+    for svc in services:
+        host_id = svc.get("hostId")
+        patterns = host_service_patterns.get(host_id)
+        if not patterns:
+            continue
+        if host_id not in compiled_by_host:
+            compiled_by_host[host_id] = _compile_patterns(sorted(patterns), errors)
+        compiled = compiled_by_host[host_id]
+        if compiled and _matches_any(svc.get("displayName") or svc.get("name") or "", compiled):
+            matched.append(svc)
+    log_debug(f"filter_services_by_host: {len(services)} fetched, {len(matched)} matched")
     return matched
 
 
@@ -345,8 +390,8 @@ def _dump_raw(dump_dir, hosts, services):
     """Save fetched-but-unfiltered API responses for later --replay-dir use.
 
     `hosts` covers every host from /hosts (so a later run can experiment
-    with different --host-pattern values); `services` covers every service
-    fetched for the currently matched hosts (before --service-pattern
+    with different --mapping values); `services` covers every service
+    fetched for the currently matched hosts (before per-host service-pattern
     filtering), matching what ReplayClient expects to find.
     """
     dump_dir = Path(dump_dir)
@@ -411,24 +456,16 @@ def _parse_args(argv):
         "--no-verify-ssl", action="store_true", help="Disable SSL certificate verification"
     )
     parser.add_argument(
-        "--host-pattern",
-        dest="host_patterns",
+        "--mapping",
+        dest="mappings",
         action="append",
         default=[],
-        help="Regex matched against a host's displayName. Repeatable. Ignored if "
-        "--all-hosts is set.",
-    )
-    parser.add_argument(
-        "--all-hosts",
-        action="store_true",
-        help="Resolve every HLMON host, bypassing --host-pattern filtering entirely.",
-    )
-    parser.add_argument(
-        "--service-pattern",
-        dest="service_patterns",
-        action="append",
-        default=[],
-        help="Regex matched against a service's displayName. Repeatable.",
+        help="JSON object pairing host-name patterns with the service-name patterns "
+        "that apply only to hosts matched by them, e.g. "
+        '\'{"host_patterns": ["server-oracle"], "all_hosts": false, '
+        '"service_patterns": ["orcl"]}\'. Set "all_hosts": true to match every host '
+        'instead (host_patterns is then ignored). Repeatable: a host matched by more '
+        "than one mapping gets the union of their service patterns.",
     )
     parser.add_argument(
         "--service-prefix",
@@ -467,10 +504,8 @@ def main(argv=None):
     args = _parse_args(argv)
     DEBUG = args.debug
 
-    if not args.all_hosts and not args.host_patterns:
-        sys.exit("agent_hlmm: at least one --host-pattern is required (unless --all-hosts is set)")
-    if not args.service_patterns:
-        sys.exit("agent_hlmm: at least one --service-pattern is required")
+    if not args.mappings:
+        sys.exit("agent_hlmm: at least one --mapping is required")
 
     if args.replay_dir:
         client = ReplayClient(args.replay_dir)
@@ -492,15 +527,15 @@ def main(argv=None):
     errors = []
     started = time.monotonic()
 
-    raw_hosts, matched_hosts = resolve_hosts(
-        client, args.host_patterns, errors, match_all=args.all_hosts
-    )
+    mappings = parse_mappings(args.mappings, errors)
+
+    raw_hosts, matched_hosts, host_service_patterns = resolve_mappings(client, mappings, errors)
     hosts_by_id = {h["id"]: h for h in matched_hosts}
 
     raw_services = fetch_services_for_hosts(
         client, list(hosts_by_id), errors, batch_size=args.host_batch_size
     )
-    matched_services = filter_services(raw_services, args.service_patterns, errors)
+    matched_services = filter_services_by_host(raw_services, host_service_patterns, errors)
 
     if args.dump_dir:
         _dump_raw(args.dump_dir, raw_hosts, raw_services)
