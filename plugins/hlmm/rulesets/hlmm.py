@@ -242,11 +242,11 @@ def _special_agent_formspec():
                     help_text=Help(
                         "Also import each matched HLMON host's own status (separate "
                         "from its services, e.g. reachability) as a 'HLMM Host Status' "
-                        "check on the piggybacked target host. Off by default so "
-                        "upgrading doesn't silently add a new service to every host "
-                        "after the next discovery."
+                        "check on the piggybacked target host. On by default; uncheck "
+                        "if you only want the imported services and not this extra "
+                        "check on every matched host."
                     ),
-                    prefill=DefaultValue(False),
+                    prefill=DefaultValue(True),
                     label=Label("Import host status as its own check"),
                 ),
             ),

@@ -28,9 +28,9 @@ description:
  check") and they are exceeded.
 
  This check is only created if the special agent rule's "Import HLMON
- host status" option is enabled; it is off by default so that upgrading
- the plugin does not silently add a new service to every already
- monitored host after the next service discovery.
+ host status" option is enabled; it is on by default, so uncheck it if
+ you only want the imported services and not this extra check on every
+ matched host.
 
  Requires the HLMON special agent to be configured on a "collector"
  host; the check is attached via piggyback to the Checkmk host that
