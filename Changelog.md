@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.0.11 (2026-09-17)
+
+- **Relicensed to GPLv3.** The `hlmm_services`/`hlmm_host_status`/
+  `hlmm_status` checkman pages' `license:` header is updated from GPLv2 to
+  GPLv3, matching the license stated in README.md.
+
 ## 0.0.10 (2026-09-17)
 
 - **Translated all remaining German check output to English.** The

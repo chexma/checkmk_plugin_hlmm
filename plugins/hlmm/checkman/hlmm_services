@@ -1,7 +1,7 @@
 title: HLMM Service Status
 agents: hlmm
 catalog: os/services
-license: GPLv2
+license: GPLv3
 distribution: check_mk
 description:
  This check imports the status of a service monitored by the HLMON

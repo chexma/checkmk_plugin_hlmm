@@ -1,7 +1,7 @@
 title: HLMM Query Status
 agents: hlmm
 catalog: os/services
-license: GPLv2
+license: GPLv3
 distribution: check_mk
 description:
  This check reports whether the HLMON special agent's own query against
