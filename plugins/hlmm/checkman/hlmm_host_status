@@ -21,7 +21,7 @@ description:
  {OK} for both).
 
  A second line reports how long ago HLMON last checked the host, and a
- third line, "Im aktuellen Status seit", how long the host has been in
+ third line, "In current state since", how long the host has been in
  its current state (HLMON's {lastChangeTimestamp}). Neither affects the
  Checkmk state. The check-age line escalates to {WARN}/{CRIT} only if the
  special agent rule configures age thresholds ("Age of last HLMON

@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## 0.0.10 (2026-09-17)
+
+- **Translated all remaining German check output to English.** The
+  `HLMM Service Status`/`HLMM Host Status`/`HLMM Query Status` checks
+  previously mixed English and German in their summaries/notices (e.g.
+  "Im aktuellen Status seit", "Letzter Check vor", "Quelle:"/"Kunde:",
+  "HLMON-Abfrage fehlgeschlagen"); all of these are now English. The
+  `hlmm_host_status`/`hlmm_services` checkman pages are updated to match
+  the renamed "In current state since" notice.
+- Removed a dangling reference to a local, unshipped design document
+  (`plans/2026-09-16-hlmm-plugin-konzept.md`) from the special agent
+  ruleset's help text in Checkmk's Setup GUI — that file isn't part of
+  the MKP package, so the reference was dead for anyone who only
+  installed the package.
+- Author metadata updated to "Andre Eckstein (Andre.Eckstein@Bechtle.com)".
+
 ## 0.0.9 (2026-09-17)
 
 - **"Import HLMON host status" now defaults to on** for new special agent

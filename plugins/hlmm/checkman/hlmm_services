@@ -25,7 +25,7 @@ description:
  avoid cluttering the main status line with information that isn't a
  problem.
 
- A third line, "Im aktuellen Status seit", shows how long the service has
+ A third line, "In current state since", shows how long the service has
  been in its current state (HLMON's {lastChangeTimestamp}, distinct from
  the check-age line above). This never affects the Checkmk state, and is
  only shown in the details unless the service is not in state {OK}.

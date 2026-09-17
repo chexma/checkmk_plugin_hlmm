@@ -1,23 +1,8 @@
 # HLMM (HL Monitoring Module)
 
-A [Checkmk](https://checkmk.com/) 2.4 special agent plugin that pulls
+A [Checkmk](https://checkmk.com/) special agent plugin that pulls
 service and host monitoring status from the external monitoring system
-**HLMON** via its REST API and attaches it as Checkmk services on the
-already-existing, same-named Checkmk hosts.
-
-> **Naming note:** *HLMON* is the external, third-party monitoring system
-> this plugin integrates with. *HLMM* is this plugin's own identifier
-> prefix (Checkmk services, ruleset, package name).
-
-## Why
-
-HLMON already monitors a fleet of hosts and services. Rather than
-duplicating that monitoring logic in Checkmk, this plugin queries HLMON's
-REST API from a single "collector" host and re-publishes the results as
-native Checkmk services on the Checkmk hosts that already exist for those
-systems — so HLMON's findings show up alongside everything else Checkmk
-already monitors, with normal Checkmk notifications, downtimes, and
-dashboards.
+[HLMM](https://monitoring-module.com/de/produkte/monitoring-module/) via its REST API and attaches it as Checkmk services with the piggyback mechanism.
 
 ## How it works
 
@@ -82,7 +67,7 @@ See the built-in check manuals (`cmk -M hlmm_services` etc., or Checkmk's
 
 ## Installation
 
-1. Download the `hlmm-X.Y.Z.mkp` file from this repository.
+1. Download the latest `hlmm-X.Y.Z.mkp` file from this repository.
 2. In Checkmk, go to **Setup > Maintenance > Extension packages** and
    upload it (or use `mkp install hlmm-X.Y.Z.mkp` on the server as the
    site user).
@@ -118,6 +103,15 @@ The special agent rule configures:
   `disk`/`cpu` services — instead of every host pattern being checked
   against every service pattern.
 
+  > **Note:** HLMON's REST API has no server-side regex filtering (only an
+  > exact-match `in` filter, used to batch-fetch services by host ID). The
+  > special agent therefore always fetches the *entire* host list from
+  > HLMON first (`GET /api/hosts`, unfiltered) and then applies the
+  > configured regexes locally, in Python, against each host's
+  > `displayName`. Narrower host patterns don't reduce the size of that
+  > initial `/hosts` request — only how many of the returned hosts end up
+  > matched.
+
 - **Service name prefix** — prepended to each imported service's name
   (default `HLMM`), e.g. to tell services from different rules apart.
 - **Effect of HLMON downtime / acknowledgement** on the Checkmk state —
@@ -137,38 +131,10 @@ special agent rules use first-match-wins per host, so only one rule's
 parameters take effect per collector host. Use a different collector host
 (and its own rule) for a genuinely independent set of patterns.
 
-## Manual / offline testing
-
-The special agent script can be run by hand, e.g. for troubleshooting:
-
-```bash
-echo 'my-api-token' | agent_hlmm \
-    --url https://hlmon.example.local \
-    --username check_mk \
-    --mapping '{"host_patterns": ["server-oracle"], "all_hosts": false, "service_patterns": ["orcl"]}' \
-    --no-verify-ssl \
-    --debug
-```
-
-It also supports `--replay-dir`/`--dump-dir` to record and replay HLMON
-API responses from local fixture files, without needing live access to a
-HLMON server.
-
-## Development
-
-See [`CLAUDE.md`](CLAUDE.md) for the full architecture notes and
-conventions. In short:
-
-```bash
-black --line-length 100 plugins/hlmm/
-flake8 --max-line-length 100 plugins/hlmm/
-pytest tests/test_hlmm_*.py
-```
-
 ## License
 
-GPLv2, matching Checkmk's own plugin licensing convention.
+GPLv3
 
 ## Author
 
-Andre Eckstein
+Andre Eckstein (Andre.Eckstein@Bechtle.com)

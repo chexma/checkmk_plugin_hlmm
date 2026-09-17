@@ -143,13 +143,13 @@ def _check_staleness(timestamp, config):
     escalating the state.
     """
     if not timestamp:
-        yield Result(state=State.OK, notice="Letzter Check: unbekannt")
+        yield Result(state=State.OK, notice="Last check: unknown")
         return
 
     try:
         checked_at = datetime.fromisoformat(timestamp)
     except ValueError:
-        yield Result(state=State.OK, notice=f"Letzter Check: {timestamp} (Format unbekannt)")
+        yield Result(state=State.OK, notice=f"Last check: {timestamp} (unknown format)")
         return
 
     now = datetime.now(checked_at.tzinfo) if checked_at.tzinfo else datetime.now()
@@ -158,14 +158,14 @@ def _check_staleness(timestamp, config):
     warn = config.get("staleness_warn")
     crit = config.get("staleness_crit")
     if warn is None or crit is None:
-        yield Result(state=State.OK, notice=f"Letzter Check vor {render.timespan(delta)}")
+        yield Result(state=State.OK, notice=f"Last checked {render.timespan(delta)} ago")
         return
 
     yield from check_levels(
         delta,
         levels_upper=("fixed", (warn, crit)),
         render_func=render.timespan,
-        label="Letzter Check vor",
+        label="Last checked",
         notice_only=True,
     )
 
@@ -180,20 +180,18 @@ def _check_state_since(timestamp):
     escalates the state itself; there's no threshold concept for this.
     """
     if not timestamp:
-        yield Result(state=State.OK, notice="Im aktuellen Status seit: unbekannt")
+        yield Result(state=State.OK, notice="In current state since: unknown")
         return
 
     try:
         changed_at = datetime.fromisoformat(timestamp)
     except ValueError:
-        yield Result(
-            state=State.OK, notice=f"Im aktuellen Status seit: {timestamp} (Format unbekannt)"
-        )
+        yield Result(state=State.OK, notice=f"In current state since: {timestamp} (unknown format)")
         return
 
     now = datetime.now(changed_at.tzinfo) if changed_at.tzinfo else datetime.now()
     delta = max((now - changed_at).total_seconds(), 0.0)
-    yield Result(state=State.OK, notice=f"Im aktuellen Status seit {render.timespan(delta)}")
+    yield Result(state=State.OK, notice=f"In current state since {render.timespan(delta)}")
 
 
 def _check_status_entry(entry, config, state_map=_STATE_MAP):
@@ -214,7 +212,7 @@ def _check_status_entry(entry, config, state_map=_STATE_MAP):
         if config.get("ack_handling", "ok") == "ok":
             state = State.OK
 
-    summary = entry.get("lastOutput") or "(keine Ausgabe)"
+    summary = entry.get("lastOutput") or "(no output)"
     if notes:
         summary += " [" + ", ".join(notes) + "]"
 
@@ -230,23 +228,23 @@ def _service_extra_notices(entry):
     already made the service non-OK) -- these never affect the state.
     """
     if source := entry.get("source"):
-        yield Result(state=State.OK, notice=f"Quelle: {source}")
+        yield Result(state=State.OK, notice=f"Source: {source}")
     if customer_name := entry.get("customerName"):
-        yield Result(state=State.OK, notice=f"Kunde: {customer_name}")
+        yield Result(state=State.OK, notice=f"Customer: {customer_name}")
     if (ticket_count := entry.get("ticketCount") or 0) > 0:
-        yield Result(state=State.OK, notice=f"{ticket_count} verknüpfte(s) Ticket(s) in HLMON")
+        yield Result(state=State.OK, notice=f"{ticket_count} linked ticket(s) in HLMON")
     if (comment_count := entry.get("commentCount") or 0) > 0:
-        yield Result(state=State.OK, notice=f"{comment_count} Kommentar(e) in HLMON")
+        yield Result(state=State.OK, notice=f"{comment_count} comment(s) in HLMON")
 
 
 def check_hlmm_services(item, section):
     if not section:
-        yield Result(state=State.UNKNOWN, summary="Keine Daten vom Special Agent erhalten")
+        yield Result(state=State.UNKNOWN, summary="No data received from the special agent")
         return
 
     entry = _find_service(section, item)
     if entry is None:
-        yield Result(state=State.UNKNOWN, summary="Von HLMON nicht mehr gemeldet")
+        yield Result(state=State.UNKNOWN, summary="No longer reported by HLMON")
         return
 
     yield from _check_status_entry(entry, section["config"])
@@ -294,7 +292,7 @@ def discover_hlmm_host_status(section):
 
 def check_hlmm_host_status(section):
     if not section:
-        yield Result(state=State.UNKNOWN, summary="Keine Daten vom Special Agent erhalten")
+        yield Result(state=State.UNKNOWN, summary="No data received from the special agent")
         return
     yield from _check_status_entry(section["host"], section["config"], state_map=_HOST_STATE_MAP)
 
@@ -329,7 +327,7 @@ def check_hlmm_status(section):
     even if it doesn't affect any single hlmm_services check directly.
     """
     if not section:
-        yield Result(state=State.UNKNOWN, summary="Keine Statusdaten vom Special Agent erhalten")
+        yield Result(state=State.UNKNOWN, summary="No status data received from the special agent")
         return
 
     errors = section.get("errors", [])
@@ -339,16 +337,16 @@ def check_hlmm_status(section):
 
     if errors and hosts_matched == 0 and services_matched == 0:
         state = State.CRIT
-        summary = f"HLMON-Abfrage fehlgeschlagen ({len(errors)} Fehler)"
+        summary = f"HLMON query failed ({len(errors)} error(s))"
     elif errors:
         state = State.WARN
-        summary = f"HLMON-Abfrage teilweise fehlgeschlagen ({len(errors)} Fehler)"
+        summary = f"HLMON query partially failed ({len(errors)} error(s))"
     else:
         state = State.OK
-        summary = f"{hosts_matched} Hosts, {services_matched} Services abgeglichen"
+        summary = f"{hosts_matched} hosts, {services_matched} services matched"
 
     if duration is not None:
-        summary += f", Laufzeit {duration:.1f}s"
+        summary += f", runtime {duration:.1f}s"
 
     details = "\n".join(f"{e.get('stage')}: {e.get('detail')}" for e in errors) or None
     yield Result(state=state, summary=summary, details=details)
