@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.0.9 (2026-09-17)
+
+- **"Import HLMON host status" now defaults to on** for new special agent
+  rules, instead of being opt-in. Existing saved rules are unaffected (they
+  keep whatever value they already have stored); only newly created rules
+  get the check by default. Ruleset help text and the `hlmm_host_status`
+  checkman page are updated to match.
+- Added a top-level `README.md` for GitHub covering the plugin's purpose,
+  piggyback architecture, checks provided, installation, and the full
+  ruleset configuration including 0.0.8's host/service pattern mappings.
+
 ## 0.0.8 (2026-09-17)
 
 - **Grouped host/service pattern mappings.** The special agent ruleset's
