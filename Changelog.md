@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## 0.0.12 (2026-10-06)
+
+- **Service exclude patterns.** Each "Host / service pattern mappings" entry
+  gets a new, optional "Service exclude patterns" list alongside the
+  existing "Service name patterns": a service that matched an include
+  pattern is removed again if it also matches one of its own host's exclude
+  patterns, so a broad include pattern can have specific services carved
+  back out of it. A host matched by more than one mapping gets the union of
+  every matching mapping's exclude patterns, same as for include patterns.
+  Agent-side: `resolve_mappings()` now also returns
+  `host_service_exclude_patterns`, and `filter_services_by_host()` applies
+  it after the existing include-pattern match. The `--mapping` JSON gains an
+  optional `service_exclude_patterns` key (defaults to none).
+
 ## 0.0.11 (2026-09-17)
 
 - **Relicensed to GPLv3.** The `hlmm_services`/`hlmm_host_status`/

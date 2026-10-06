@@ -89,10 +89,15 @@ The special agent rule configures:
   - **Service name patterns**: regular expressions matched against each
     HLMON service's `displayName`, applied only to hosts matched by that
     same entry.
+  - **Service exclude patterns** (optional): regular expressions matched
+    against the same already-matched services — a service matching one of
+    these is removed again, even though it matched a service name pattern
+    above. Useful to carve specific services back out of a broad include
+    pattern, e.g. include `orcl` but exclude `orcl-test`.
 
   A host matched by more than one entry gets the union of every matching
-  entry's service patterns. This lets a single rule express independent
-  host/service groupings, e.g.:
+  entry's service patterns (and the union of their exclude patterns). This
+  lets a single rule express independent host/service groupings, e.g.:
 
   | Entry | Hosts to import | Service name patterns |
   |---|---|---|

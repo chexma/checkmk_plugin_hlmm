@@ -91,11 +91,13 @@ def _special_agent_formspec():
                     help_text=Help(
                         "Each entry pairs a set of HLMON host-name patterns with the "
                         "service-name patterns to import for hosts matched by that "
-                        "entry. A host matched by more than one entry gets the union "
-                        "of every matching entry's service patterns. Example: entry 1 "
-                        "matches hosts 'server-oracle' with service pattern 'orcl'; "
-                        "entry 2 matches hosts 'server-windows' with service patterns "
-                        "'disk', 'cpu'."
+                        "entry, plus optional exclude patterns to remove specific "
+                        "services back out of that result. A host matched by more "
+                        "than one entry gets the union of every matching entry's "
+                        "service patterns (and the union of their exclude patterns). "
+                        "Example: entry 1 matches hosts 'server-oracle' with service "
+                        "pattern 'orcl'; entry 2 matches hosts 'server-windows' with "
+                        "service patterns 'disk', 'cpu'."
                     ),
                     element_template=Dictionary(
                         elements={
@@ -156,6 +158,26 @@ def _special_agent_formspec():
                                         "import' setting above. A service is imported "
                                         "if it matches any of the patterns. Example: "
                                         "orcl"
+                                    ),
+                                    element_template=String(title=Title("Pattern (Python regex)")),
+                                    custom_validate=(validators.LengthInRange(min_value=1),),
+                                    add_element_label=Label("Add pattern"),
+                                ),
+                            ),
+                            "service_exclude_patterns": DictElement(
+                                required=False,
+                                parameter_form=List(
+                                    title=Title("Service exclude patterns"),
+                                    help_text=Help(
+                                        "Regular expressions matched against each "
+                                        "already-matched service's displayName (see "
+                                        "'Service name patterns' above) -- a service "
+                                        "matching any of these is removed again, even "
+                                        "though it matched an include pattern. Useful "
+                                        "to carve specific services back out of a broad "
+                                        "include pattern. Leave empty to exclude "
+                                        "nothing. Applied only to hosts matched by this "
+                                        "entry's 'Hosts to import' setting above."
                                     ),
                                     element_template=String(title=Title("Pattern (Python regex)")),
                                     custom_validate=(validators.LengthInRange(min_value=1),),

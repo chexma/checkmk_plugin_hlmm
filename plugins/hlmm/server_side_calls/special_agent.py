@@ -17,12 +17,17 @@ def _agent_arguments(params, host_config):
         args.append("--no-verify-ssl")
 
     # Each host_service_mappings entry is {"hosts": ("patterns", [regex, ...])
-    # or ("all", None), "service_patterns": [regex, ...]}. Serialized as one
-    # JSON object per --mapping flag so agent_hlmm can scope each entry's
-    # service patterns to only the hosts that entry's host patterns matched.
+    # or ("all", None), "service_patterns": [regex, ...],
+    # "service_exclude_patterns": [regex, ...]}. Serialized as one JSON
+    # object per --mapping flag so agent_hlmm can scope each entry's service
+    # (include and exclude) patterns to only the hosts that entry's host
+    # patterns matched.
     for mapping in params.get("host_service_mappings", []):
         host_mode, host_value = mapping.get("hosts", ("patterns", []))
-        payload = {"service_patterns": mapping.get("service_patterns", [])}
+        payload = {
+            "service_patterns": mapping.get("service_patterns", []),
+            "service_exclude_patterns": mapping.get("service_exclude_patterns", []),
+        }
         if host_mode == "all":
             payload["all_hosts"] = True
         else:
