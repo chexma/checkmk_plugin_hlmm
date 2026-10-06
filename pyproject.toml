@@ -1,0 +1,13 @@
+[tool.black]
+line-length = 100
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Only the hlmm suite: the old sep_sesam tests (tests/test_checks.py,
+# tests/test_agent.py) replace sys.modules["cmk"] with a stub and break every
+# later cmk.* import in the same session.
+python_files = ["test_hlmm_*.py"]

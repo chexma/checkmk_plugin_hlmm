@@ -1,0 +1,10 @@
+# Scripts and executables must keep LF line endings, or they fail on the
+# Checkmk site ("/usr/bin/env: 'python3\r'") after a checkout on Windows.
+*.sh                text eol=lf
+Dockerfile          text eol=lf
+bin/*               text eol=lf
+nagios_plugins/*    text eol=lf
+**/libexec/*        text eol=lf
+
+# MKP packages are tar.gz archives.
+*.mkp               binary
